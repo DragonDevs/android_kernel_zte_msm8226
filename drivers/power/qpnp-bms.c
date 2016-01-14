@@ -10,7 +10,8 @@
  * GNU General Public License for more details.
  */
 
-#define pr_fmt(fmt)	"BMS: %s: " fmt, __func__
+//#define pr_fmt(fmt)	"BMS: %s: " fmt, __func__
+#define pr_fmt(fmt)	"[BMS] %s(%d): " fmt, __func__,__LINE__
 
 #include <linux/module.h>
 #include <linux/types.h>
@@ -654,16 +655,33 @@ static int read_cc_raw(struct qpnp_bms_chip *chip, int64_t *reading,
 {
 	int64_t raw_reading;
 	int rc;
+	static int64_t cc_backup = 0;
+	static int64_t shdw_cc_backup = 0;
+	int i;
 
-	if (cc_type == SHDW_CC)
-		rc = qpnp_read_wrapper(chip, (u8 *)&raw_reading,
-				chip->base + BMS1_SW_CC_DATA0, 5);
-	else
-		rc = qpnp_read_wrapper(chip, (u8 *)&raw_reading,
-				chip->base + BMS1_CC_DATA0, 5);
-	if (rc) {
-		pr_err("Error reading cc: rc = %d\n", rc);
-		return -ENXIO;
+	for (i = 0; i < 10; i++) {
+		if (cc_type == SHDW_CC){
+			rc = qpnp_read_wrapper(chip, (u8 *)&raw_reading,
+					chip->base + BMS1_SW_CC_DATA0, 5);
+			if (rc) {
+				pr_err("Error reading shdw_cc: rc = %d i=%d\n", rc, i);
+				raw_reading = shdw_cc_backup;
+			} else {
+				shdw_cc_backup = raw_reading;
+				break;
+			}
+		}else {
+			rc = qpnp_read_wrapper(chip, (u8 *)&raw_reading,
+					chip->base + BMS1_CC_DATA0, 5);
+			if (rc) {
+				pr_err("Error reading cc: rc = %d i=%d\n", rc, i);
+				raw_reading = cc_backup;
+			} else {
+				cc_backup = raw_reading;
+				break;
+			}
+		}
+		mdelay(10);
 	}
 
 	*reading = convert_s36_to_s64(raw_reading);
@@ -940,6 +958,7 @@ static int estimate_ocv(struct qpnp_bms_chip *chip, int batt_temp)
 	}
 
 	ocv_est_uv = vbat_uv + (ibat_ua * rbatt_mohm) / 1000;
+	pr_info("vbat_uv=%d ibat_ua=%d rbatt=%d estimated pon ocv = %d\n", vbat_uv, ibat_ua, rbatt_mohm, ocv_est_uv);
 	pr_debug("estimated pon ocv = %d, vbat_uv = %d ibat_ua = %d rbatt_mohm = %d\n",
 			ocv_est_uv, vbat_uv, ibat_ua, rbatt_mohm);
 	return ocv_est_uv;
@@ -1071,9 +1090,12 @@ static int read_soc_params_raw(struct qpnp_bms_chip *chip,
 			chip->last_ocv_uv = estimate_ocv(chip, batt_temp);
 			raw->last_good_ocv_uv = chip->last_ocv_uv;
 			reset_cc(chip, CLEAR_CC | CLEAR_SHDW_CC);
-			pr_debug("New PON_OCV_UV = %d, cc = %llx\n",
+			pr_info("New PON_OCV_UV = %d, cc = %llx\n",
 					chip->last_ocv_uv, raw->cc);
 		}
+		pr_info("**last_good_ocv_raw= 0x%x, last_good_ocv_uv= %duV\n",
+			raw->last_good_ocv_raw, raw->last_good_ocv_uv);
+		pr_info("**cc_raw= 0x%llx\n", raw->cc);
 	} else if (chip->new_battery) {
 		/* if a new battery was inserted, estimate the ocv */
 		reset_for_new_battery(chip, batt_temp);
@@ -1369,6 +1391,8 @@ static int calculate_unusable_charge_uah(struct qpnp_bms_chip *chip,
 	 */
 	if (chip->first_time_calc_uuc && chip->shutdown_iavg_ma != 0) {
 		pr_debug("Using shutdown_iavg_ma = %d in all samples\n",
+				chip->shutdown_iavg_ma);
+		pr_info("Using shutdown_iavg_ma = %d in all samples\n",
 				chip->shutdown_iavg_ma);
 		for (i = 0; i < IAVG_SAMPLES; i++)
 			chip->iavg_samples_ma[i] = chip->shutdown_iavg_ma;
@@ -2213,6 +2237,8 @@ static int clamp_soc_based_on_voltage(struct qpnp_bms_chip *chip, int soc)
 	if (soc <= 0 && vbat_uv > chip->v_cutoff_uv) {
 		pr_debug("clamping soc to 1, vbat (%d) > cutoff (%d)\n",
 						vbat_uv, chip->v_cutoff_uv);
+		pr_info("adjust soc from 0 to 1, vbat (%d) > cutoff (%d)\n",
+						vbat_uv, chip->v_cutoff_uv);
 		return 1;
 	} else {
 		pr_debug("not clamping, using soc = %d, vbat = %d and cutoff = %d\n",
@@ -2267,7 +2293,7 @@ static void configure_soc_wakeup(struct qpnp_bms_chip *chip,
 	target_cc_uah = (100 - target_soc)
 		* (params->fcc_uah - params->uuc_uah)
 		/ 100 - current_shdw_cc_uah;
-	if (target_cc_uah < 0) {
+	if (target_cc_uah < CC_STEP_INCREMENT_UAH) {
 		/*
 		 * If the target cc is below 0, that means we have already
 		 * passed the point where SoC should have fallen.
@@ -2322,16 +2348,25 @@ static int calculate_raw_soc(struct qpnp_bms_chip *chip,
 	remaining_usable_charge_uah = params->ocv_charge_uah
 					- params->cc_uah
 					- params->uuc_uah;
-	pr_debug("RUC = %duAh\n", remaining_usable_charge_uah);
-
+#if defined(CONFIG_BOARD_DRACONIS) || defined(CONFIG_BOARD_CYGNI)
 	soc = DIV_ROUND_CLOSEST((remaining_usable_charge_uah * 100),
-				(params->fcc_uah - params->uuc_uah));
-
+				(params->fcc_uah - params->uuc_uah - 30000));
+#else
+	soc = DIV_ROUND_CLOSEST((remaining_usable_charge_uah * 100),
+				(params->fcc_uah - params->uuc_uah ));
+#endif
+        pr_info("RUC=%d,FCC=%d,UUC=%d,CC=%d,ocv_charge_uah=%d\n", 
+		remaining_usable_charge_uah,params->fcc_uah,params->uuc_uah,
+		params->cc_uah,params->ocv_charge_uah);
 	if (chip->first_time_calc_soc && soc > BAD_SOC_THRESH && soc < 0) {
 		/*
 		 * first time calcualtion and the pon ocv  is too low resulting
 		 * in a bad soc. Adjust ocv to get 0 soc
 		 */
+		pr_info("first time, soc %d, batt temp %d, rbatt %d, \
+				fcc_uah %d, unusable_charge_uah %d, cc_uah %d\n",
+				soc, batt_temp, params->rbatt_mohm, 
+				params->fcc_uah, params->uuc_uah, params->cc_uah);
 		pr_debug("soc is %d, adjusting pon ocv to make it 0\n", soc);
 		chip->last_ocv_uv = find_ocv_for_pc(chip, batt_temp,
 				find_pc_for_soc(chip, params, 0));
@@ -2345,7 +2380,7 @@ static int calculate_raw_soc(struct qpnp_bms_chip *chip,
 		soc = DIV_ROUND_CLOSEST((remaining_usable_charge_uah * 100),
 					(params->fcc_uah
 						- params->uuc_uah));
-		pr_debug("DONE for O soc is %d, pon ocv adjusted to %duV\n",
+		pr_info("DONE for O soc is %d, pon ocv adjusted to %duV\n",
 				soc, chip->last_ocv_uv);
 	}
 
@@ -2363,7 +2398,7 @@ static int calculate_raw_soc(struct qpnp_bms_chip *chip,
 				params->fcc_uah, soc);
 		soc = 0;
 	}
-
+	
 	return soc;
 }
 
@@ -2418,7 +2453,7 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 					(params.fcc_uah
 						- params.uuc_uah));
 
-		pr_debug("DONE for shutdown_soc = %d soc is %d, adjusted ocv to %duV\n",
+		pr_info("DONE for shutdown_soc = %d soc is %d, adjusted ocv to %duV\n",
 				shutdown_soc, soc, chip->last_ocv_uv);
 	}
 	mutex_unlock(&chip->soc_invalidation_mutex);
@@ -2434,6 +2469,10 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	/* always clamp soc due to BMS hw/sw immaturities */
 	new_calculated_soc = clamp_soc_based_on_voltage(chip,
 					new_calculated_soc);
+	pr_debug("soc %d, batt temp %d, rbatt %d, \
+		fcc_uah %d, uuc_uah %d, cc_uah %d\n",
+		soc, batt_temp, params.rbatt_mohm, 
+		params.fcc_uah, params.uuc_uah, params.cc_uah);
 	/*
 	 * If the battery is full, configure the cc threshold so the system
 	 * wakes up after SoC changes
@@ -2580,6 +2619,7 @@ static int recalculate_soc(struct qpnp_bms_chip *chip)
 	mutex_unlock(&chip->vbat_monitor_mutex);
 	if (chip->use_voltage_soc) {
 		soc = calculate_soc_from_voltage(chip);
+		pr_info("calculate soc from voltage,soc=%d\n", soc);
 	} else {
 		if (!chip->batfet_closed)
 			qpnp_iadc_calibrate_for_trim(chip->iadc_dev, false);
@@ -2597,6 +2637,8 @@ static int recalculate_soc(struct qpnp_bms_chip *chip)
 
 			mutex_lock(&chip->last_ocv_uv_mutex);
 			read_soc_params_raw(chip, &raw, batt_temp);
+			pr_debug("ocv_raw= 0x%x, ocv_uv= %duV,cc = %lld\n",
+					raw.last_good_ocv_raw, raw.last_good_ocv_uv, raw.cc);		//zte jiangfeng
 			soc = calculate_state_of_charge(chip, &raw, batt_temp);
 			mutex_unlock(&chip->last_ocv_uv_mutex);
 		}
@@ -3355,10 +3397,24 @@ static void battery_insertion_check(struct qpnp_bms_chip *chip)
 }
 
 /* Returns capacity as a SoC percentage between 0 and 100 */
+#if 0//zte modify
 static int get_prop_bms_capacity(struct qpnp_bms_chip *chip)
 {
 	return report_state_of_charge(chip);
 }
+#else
+static int get_prop_bms_capacity(struct qpnp_bms_chip *chip)
+{
+	int soc = report_state_of_charge(chip);
+	
+	if(soc == 100 && is_battery_charging(chip)) {
+		pr_info("zte adjust from 100->99\n");
+		soc = 99;
+	}
+	pr_debug("bms report soc=%d\n",soc);
+	return soc;
+}
+#endif
 
 static void qpnp_bms_external_power_changed(struct power_supply *psy)
 {
@@ -3493,7 +3549,7 @@ static int read_shutdown_soc(struct qpnp_bms_chip *chip)
 	else
 		shutdown_soc = SOC_INVALID;
 
-	pr_debug("stored soc = 0x%02x, shutdown_soc = %d\n",
+	pr_info("stored soc = 0x%02x, shutdown_soc = %d\n",
 			stored_soc, shutdown_soc);
 	return shutdown_soc;
 }
@@ -3538,6 +3594,8 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 			> chip->shutdown_soc_valid_limit);
 	pr_debug("calculated_soc = %d, valid_limit = %d\n",
 			calculated_soc, chip->shutdown_soc_valid_limit);
+	pr_info("shutdown_soc = %d, calculated_soc = %d, valid_limit = %d\n",
+			shutdown_soc, calculated_soc, chip->shutdown_soc_valid_limit);
 
 	/*
 	 * Check if the battery has been replaced while the system was powered
@@ -3553,7 +3611,7 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 		chip->battery_removed = true;
 		chip->shutdown_soc_invalid = true;
 		chip->shutdown_iavg_ma = MIN_IAVG_MA;
-		pr_debug("Ignoring shutdown SoC: invalid = %d, offmode = %d, out_of_limit = %d\n",
+		pr_info("Ignoring shutdown SoC: invalid = %d, offmode = %d, out_of_limit = %d\n",
 				invalid_stored_soc, offmode_battery_replaced,
 				shutdown_soc_out_of_limit);
 	} else {
@@ -3561,7 +3619,7 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 		chip->shutdown_soc = shutdown_soc;
 	}
 
-	pr_debug("raw_soc = %d shutdown_soc = %d shutdown_iavg = %d shutdown_soc_invalid = %d, battery_removed = %d\n",
+	pr_info("raw_soc = %d shutdown_soc = %d shutdown_iavg = %d shutdown_soc_invalid = %d, battery_removed = %d\n",
 			calculated_soc,
 			chip->shutdown_soc,
 			chip->shutdown_iavg_ma,
@@ -3572,7 +3630,7 @@ static void load_shutdown_data(struct qpnp_bms_chip *chip)
 static irqreturn_t bms_ocv_thr_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_bms_chip *chip = _chip;
-
+	pr_info("\n");
 	pr_debug("ocv_thr irq triggered\n");
 	bms_stay_awake(&chip->soc_wake_source);
 	schedule_work(&chip->recalc_work);
@@ -3583,6 +3641,7 @@ static irqreturn_t bms_sw_cc_thr_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_bms_chip *chip = _chip;
 
+	pr_info("\n");
 	pr_debug("sw_cc_thr irq triggered\n");
 	disable_bms_irq_nosync(&chip->sw_cc_thr_irq);
 	bms_stay_awake(&chip->soc_wake_source);
@@ -3605,6 +3664,43 @@ static int64_t read_battery_id(struct qpnp_bms_chip *chip)
 	return result.physical;
 }
 
+#if 1   //ZTE platform
+extern void* get_bms_battery_data(void);
+static int set_battery_data(struct qpnp_bms_chip *chip)
+{
+	int64_t battery_id;
+	struct bms_battery_data* palladium_data;
+
+	palladium_data	=	(struct bms_battery_data*)get_bms_battery_data();
+	battery_id = read_battery_id(chip);
+	if (battery_id < 0) {
+		pr_err("zte charge read battery id err = %lld\n", battery_id);
+		return battery_id;
+	}
+	pr_info("zte charge read battery_id NO USED =0x%llX,FCC=%d\n",battery_id,palladium_data->fcc);
+
+	chip->fcc_mah = palladium_data->fcc;
+	chip->fcc_temp_lut = palladium_data->fcc_temp_lut;
+	chip->fcc_sf_lut = palladium_data->fcc_sf_lut;
+	chip->pc_temp_ocv_lut = palladium_data->pc_temp_ocv_lut;
+	chip->pc_sf_lut = palladium_data->pc_sf_lut;
+	chip->rbatt_sf_lut = palladium_data->rbatt_sf_lut;
+	chip->default_rbatt_mohm = palladium_data->default_rbatt_mohm;
+	chip->rbatt_capacitive_mohm = palladium_data->rbatt_capacitive_mohm;
+	chip->flat_ocv_threshold_uv = palladium_data->flat_ocv_threshold_uv;
+
+	pr_info("set_battery_data  palladium_data->max_voltage_uv=%d,palladium_data->cutoff_uv=%d,palladium_data->iterm_ua =%d\n",palladium_data->max_voltage_uv,\
+		palladium_data->cutoff_uv,palladium_data->iterm_ua);
+
+
+	if (chip->pc_temp_ocv_lut == NULL) {
+		pr_err("temp ocv lut table is NULL\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
+#else
 static int set_battery_data(struct qpnp_bms_chip *chip)
 {
 	int64_t battery_id;
@@ -3712,6 +3808,7 @@ assign_data:
 
 	return 0;
 }
+#endif
 
 static int bms_get_adc(struct qpnp_bms_chip *chip,
 					struct spmi_device *spmi)
@@ -3801,6 +3898,19 @@ static inline int bms_read_properties(struct qpnp_bms_chip *chip)
 	chip->use_external_rsense = of_property_read_bool(
 			chip->spmi->dev.of_node,
 			"qcom,use-external-rsense");
+#if defined(CONFIG_BOARD_GRUIS)
+	{
+	  extern uint8_t read_zte_hw_ver_byte(void);
+	  if(0 == read_zte_hw_ver_byte()) {
+	  	chip->use_external_rsense = false;
+		pr_info("P892A12[GRUIS] hw_ver=0, use Internal Rsens\n");
+	  }
+	  else {
+		chip->use_external_rsense = true;
+		pr_info("P892A12[GRUIS] hw_ver!=0, use External Rsens\n");
+	  }
+	}
+#endif
 	chip->ignore_shutdown_soc = of_property_read_bool(
 			chip->spmi->dev.of_node,
 			"qcom,ignore-shutdown-soc");

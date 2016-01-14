@@ -61,7 +61,8 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 	pr_debug("%s: enable=%d\n", __func__, enable);
-
+	printk("LCD %s : enable=%d \n",__func__,enable);
+	
 	if (enable) {
 		ret = msm_dss_enable_vreg(
 			ctrl_pdata->power_data.vreg_config,
@@ -137,7 +138,10 @@ static int mdss_dsi_get_dt_vreg_data(struct device *dev,
 	for_each_child_of_node(of_node, supply_node) {
 		if (!strncmp(supply_node->name, "qcom,platform-supply-entry",
 						26))
-			++mp->num_vreg;
+			if(!of_property_read_bool(supply_node,"zte,supply_disabled"))//pan
+			{
+				++mp->num_vreg;
+			}
 	}
 	if (mp->num_vreg == 0) {
 		pr_debug("%s: no vreg\n", __func__);
@@ -166,6 +170,10 @@ static int mdss_dsi_get_dt_vreg_data(struct device *dev,
 					__func__, rc);
 				goto error;
 			}
+			
+			if(of_property_read_bool(supply_node,"zte,supply_disabled"))// pan				
+				continue;
+			
 			snprintf(mp->vreg_config[i].vreg_name,
 				ARRAY_SIZE((mp->vreg_config[i].vreg_name)),
 				"%s", st);
@@ -333,20 +341,23 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata)
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
 
 	ret = mdss_dsi_panel_power_on(pdata, 0);
+	
 	if (ret) {
 		mutex_unlock(&ctrl_pdata->mutex);
 		pr_err("%s: Panel power off failed\n", __func__);
 		return ret;
-	}
-
+	}	
+		
 	if (panel_info->dynamic_fps
 	    && (panel_info->dfps_update == DFPS_SUSPEND_RESUME_MODE)
 	    && (panel_info->new_fps != panel_info->mipi.frame_rate))
 		panel_info->mipi.frame_rate = panel_info->new_fps;
+	msleep(10);//pan
+	mdss_dsi_panel_5v_power(pdata, 0);//pan
 
 	mutex_unlock(&ctrl_pdata->mutex);
 	pr_debug("%s-:\n", __func__);
-
+	printk("LCD %s :\n",__func__);
 	return ret;
 }
 
@@ -704,8 +715,9 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 
 	if (pdata->panel_info.type == MIPI_CMD_PANEL)
 		mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
-
+                mdss_dsi_panel_5v_power(pdata, 1);//pan  reset after 5v power
 	pr_debug("%s-:\n", __func__);
+	printk("LCD %s :\n",__func__);
 	return 0;
 }
 
@@ -744,7 +756,7 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 	}
 
 	pr_debug("%s-:\n", __func__);
-
+	printk("LCD %s :\n",__func__);
 	return ret;
 }
 
@@ -830,6 +842,7 @@ int mdss_dsi_cont_splash_on(struct mdss_panel_data *pdata)
 	mdss_dsi_host_init(pdata);
 	mdss_dsi_op_mode_config(mipi->mode, pdata);
 	pr_debug("%s-:End\n", __func__);
+	printk("LCD %s :\n",__func__);
 	return ret;
 }
 
@@ -1453,6 +1466,10 @@ int dsi_panel_device_register(struct device_node *pan_node,
 								__func__);
 		}
 		pinfo->new_fps = pinfo->mipi.frame_rate;
+	} else if (pinfo->type == MIPI_VIDEO_PANEL) {
+		pinfo->dynamic_fps = true;
+		pinfo->dfps_update = DFPS_SUSPEND_RESUME_MODE;
+		pinfo->new_fps = pinfo->mipi.frame_rate;
 	}
 
 	pinfo->panel_max_fps = mdss_panel_get_framerate(pinfo);
@@ -1463,7 +1480,36 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	if (!gpio_is_valid(ctrl_pdata->disp_en_gpio))
 		pr_err("%s:%d, Disp_en gpio not specified\n",
 						__func__, __LINE__);
-
+	
+	ctrl_pdata->lcd_5v_vsp_en_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
+		"zte,lcd-5v-vsp-enable-gpio", 0);	
+	if (!gpio_is_valid(ctrl_pdata->lcd_5v_vsp_en_gpio)) {
+		pr_err("%s:%d, qcom,lcd-5v-vsp-enable-gpio not specified\n",
+						__func__, __LINE__);
+	} else {
+		rc = gpio_request(ctrl_pdata->lcd_5v_vsp_en_gpio, "lcd_5v_vsp_en_gpio");
+		if (rc) {
+			pr_err("request lcd_5v_vsp_en_gpio failed, rc=%d\n",
+			       rc);
+			gpio_free(ctrl_pdata->lcd_5v_vsp_en_gpio);
+			return -ENODEV;
+		}
+	}
+	ctrl_pdata->lcd_5v_vsn_en_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
+		"zte,lcd-5v-vsn-enable-gpio", 0);	
+	if (!gpio_is_valid(ctrl_pdata->lcd_5v_vsn_en_gpio)) {
+		pr_err("%s:%d, qcom,lcd-5v-vsn-enable-gpio not specified\n",
+						__func__, __LINE__);
+	} else {
+		rc = gpio_request(ctrl_pdata->lcd_5v_vsn_en_gpio, "lcd_5v_vsn_en_gpio");
+		if (rc) {
+			pr_err("request lcd_5v_vsn_en_gpio failed, rc=%d\n",
+			       rc);
+			gpio_free(ctrl_pdata->lcd_5v_vsn_en_gpio);
+			return -ENODEV;
+		}
+	}
+	
 	if (pinfo->type == MIPI_CMD_PANEL) {
 		ctrl_pdata->disp_te_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
 						"qcom,platform-te-gpio", 0);
@@ -1511,7 +1557,7 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	if (!gpio_is_valid(ctrl_pdata->rst_gpio))
 		pr_err("%s:%d, reset gpio not specified\n",
 						__func__, __LINE__);
-
+	ctrl_pdata->mode_gpio =-1;//pan
 	if (pinfo->mode_gpio_state != MODE_GPIO_NOT_VALID) {
 
 		ctrl_pdata->mode_gpio = of_get_named_gpio(
@@ -1541,6 +1587,10 @@ int dsi_panel_device_register(struct device_node *pan_node,
 
 	if (ctrl_pdata->bklt_ctrl == BL_PWM)
 		mdss_dsi_panel_pwm_cfg(ctrl_pdata);
+
+	ctrl_pdata->bl_cmd_gpio = pinfo->bl_cmd_gpio;
+	if (ctrl_pdata->bklt_ctrl == BL_CMD_GPIO)
+		mdss_dsi_panel_bl_cmd_gpio_cfg(ctrl_pdata);
 
 	mdss_dsi_ctrl_init(ctrl_pdata);
 	/*

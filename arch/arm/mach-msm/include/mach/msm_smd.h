@@ -145,8 +145,14 @@ struct smd_platform {
 
 #ifdef CONFIG_MSM_SMD
 /* warning: notify() may be called before open returns */
+#if 0
 int smd_open(const char *name, smd_channel_t **ch, void *priv,
 	     void (*notify)(void *priv, unsigned event));
+#else
+int smd_open_zte(const char *name, smd_channel_t **_ch,
+	     void *priv, void (*notify)(void *, unsigned), const char* func, int line);
+#define smd_open(name, ch, priv, notify) smd_open_zte(name, ch,	priv, notify, __func__, __LINE__)
+#endif
 
 int smd_close(smd_channel_t *ch);
 
@@ -193,8 +199,16 @@ int smd_tiocmget(smd_channel_t *ch);
 int smd_tiocmset(smd_channel_t *ch, unsigned int set, unsigned int clear);
 int
 smd_tiocmset_from_cb(smd_channel_t *ch, unsigned int set, unsigned int clear);
+//zte jiangfeng change
+#if 0
 int smd_named_open_on_edge(const char *name, uint32_t edge, smd_channel_t **_ch,
 			   void *priv, void (*notify)(void *, unsigned));
+#else
+int smd_named_open_on_edge_zte(const char *name, uint32_t edge, smd_channel_t **_ch,
+			   void *priv, void (*notify)(void *, unsigned), const char* func, int line);
+#define smd_named_open_on_edge(name,edge, ch, priv, notify) smd_named_open_on_edge_zte(name, edge, ch, priv, notify, __func__, __LINE__)
+#endif
+//zte jiangfeng change
 
 /* Tells the other end of the smd channel that this end wants to recieve
  * interrupts when the written data is read.  Read interrupts should only

@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  *
  */
-#define pr_fmt(fmt)	"%s: " fmt, __func__
+#define pr_fmt(fmt)	"[CHG] %s(%d): " fmt, __func__,__LINE__
 
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -32,6 +32,11 @@
 #include <linux/qpnp-revid.h>
 #include <linux/android_alarm.h>
 #include <linux/spinlock.h>
+#include <linux/reboot.h>	/*zte add:For kernel_power_off() */
+
+#if defined (CONFIG_TOUCHSCREEN_FT5X06_ZTE)
+extern int focaltech_ts_notifier_call_chain(unsigned long val);
+#endif
 
 /* Interrupt offsets */
 #define INT_RT_STS(base)			(base + 0x10)
@@ -306,6 +311,7 @@ struct qpnp_chg_chip {
 	struct qpnp_chg_irq		coarse_det_usb;
 	bool				bat_is_cool;
 	bool				bat_is_warm;
+	bool				bat_is_hot;//zte
 	bool				chg_done;
 	bool				charger_monitor_checked;
 	bool				usb_present;
@@ -388,10 +394,21 @@ struct qpnp_chg_chip {
 	struct work_struct		reduce_power_stage_work;
 	bool				power_stage_workaround_running;
 	bool				power_stage_workaround_enable;
+	struct wake_lock charger_wake_lock;		//zte add
+        struct wake_lock charger_fulled_lock;		//zte add
+#if defined(CONFIG_TOUCHSCREEN_FT5X06_ZTE)
+		struct delayed_work 	ts_usbdet_notify_work;
+#endif	
+	struct delayed_work		update_heartbeat_work; 	//zte add
+	struct delayed_work		soft_cc_monitor_work; 	//zte add
+	int fast_chg_on; // zte add
 };
 
 static void
 qpnp_chg_set_appropriate_battery_current(struct qpnp_chg_chip *chip);
+
+static int soft_cc_adjust_soc(struct qpnp_chg_chip *chip);
+#define SOFT_CC_DEBUG 0
 
 static struct of_device_id qpnp_charger_match_table[] = {
 	{ .compatible = QPNP_CHARGER_DEV_NAME, },
@@ -423,12 +440,255 @@ static u8 btc_value[] = {
 	[COLD_THD_70_PCT] = 0x0,
 	[COLD_THD_80_PCT] = BIT(1),
 };
+struct qpnp_chg_chip *zte_chip	=	NULL;	//zte jiangfeng add
 
 enum usbin_health {
 	USBIN_UNKNOW,
 	USBIN_OK,
 	USBIN_OVP,
 };
+//============== Ext OVP Start ==========================
+static int ext_ovp_present;
+module_param(ext_ovp_present, int, 0644);//zte
+
+#define USB_WALL_THRESHOLD_MA	500
+#define OVP_USB_WALL_THRESHOLD_MA	200
+
+#include <linux/gpio.h>
+extern int get_sysnumber_byname(char* name);
+#define EXT_OVP_EN 		"ext_ovp_en"
+static int gpio_ext_ovp_en = 0;
+static int ext_ovp_status = 0;
+extern int socinfo_get_ftm_flag(void);
+
+static int zte_ext_ovp_init(void)
+{
+	int rc;
+	
+	gpio_ext_ovp_en = get_sysnumber_byname(EXT_OVP_EN);
+
+	rc=gpio_request(gpio_ext_ovp_en, EXT_OVP_EN);
+	if (rc) {
+                pr_info("unable to request ext_ovp_en(%d)\n",rc);
+        } else {
+                pr_info("success\n");
+	}
+	
+	return 0;
+}
+
+static int zte_ext_ovp_enable(void)
+{
+	int rc = 0;
+	
+	rc = gpio_direction_output(gpio_ext_ovp_en,1);
+	if (rc) {
+		pr_err("unable to set direction(%d)\n",rc);
+	} else {
+		pr_info("success\n");
+	}
+	ext_ovp_status = 1;
+	return rc;
+}
+
+static int zte_ext_ovp_disable(void)
+{
+	int rc = 0;
+	
+	rc = gpio_direction_output(gpio_ext_ovp_en,0);
+	if (rc) {
+		pr_err("unable to set direction(%d)\n",rc);
+	} else {
+		pr_info("success\n");
+	}
+	ext_ovp_status = 0;
+	
+	return rc;
+}
+//============== Ext OVP End ==========================
+
+//============== Battery Switch Start ==========================
+static int battery_switch_support = 0;
+static int poweroff_bs = 0;
+static int factory_mode = 0;
+int is_factory_mode = 0;
+#define BATTERY_SWITCH 		"battery_switch"
+static int gpio_batt_switch_en = 0;
+
+static int zte_batt_switch_init(void)
+{
+	int rc;
+	
+	gpio_batt_switch_en = get_sysnumber_byname(BATTERY_SWITCH);
+
+	rc=gpio_request(gpio_batt_switch_en, BATTERY_SWITCH);
+	if (rc) {
+    	pr_info("unable to request battery_switch(%d)\n",rc);
+    } else {
+		pr_info("success\n");
+	}
+	//gpio_direction_output(gpio_batt_switch_en,0);
+	
+	return 0;
+}
+
+/*
+ *hardware will poweroff after 7.3second automatically when pin from
+ *low to high (rising edge triggered) and holding it high for at least 1 ms
+ */
+static int poweroff_bs_set(const char *val, struct kernel_param *kp)
+{
+	int ret;
+
+	ret = param_set_int(val, kp);
+
+	if (ret)
+		return ret;
+	
+	if (poweroff_bs != 1)
+		return 0 ;
+	pr_info("%s:switch down",__func__);
+	gpio_direction_output(gpio_batt_switch_en,0);
+	msleep(10);
+	gpio_direction_output(gpio_batt_switch_en,1);
+	return 0;
+}
+module_param_call(poweroff_bs, poweroff_bs_set, NULL,
+			&poweroff_bs, 0644);
+
+static int factory_mode_set(const char *val, struct kernel_param *kp)
+{
+	int ret;
+
+	ret = param_set_int(val, kp);
+
+	if (ret)
+		return ret;
+	
+	if (factory_mode == 0)
+		is_factory_mode = 0;
+	else
+		is_factory_mode = 1;
+
+	return 0;
+}
+
+static int factory_mode_get(char *buffer, struct kernel_param *kp)
+{
+	return	sprintf(buffer,"%d",is_factory_mode);
+}
+module_param_call(factory_mode, factory_mode_set, factory_mode_get,
+			&factory_mode, 0644);
+
+int battery_switch_enable(void)
+{
+	if (!is_factory_mode)
+		return -1;
+	gpio_direction_output(gpio_batt_switch_en,0);
+	mdelay(10);
+	gpio_direction_output(gpio_batt_switch_en,1);
+	return 0;
+}
+EXPORT_SYMBOL(battery_switch_enable);
+//============Battery Switch end==============
+
+#if defined(CONFIG_ZTE_CHGPATH_SWITCH)
+#define CHARGE_SW_EN 		"charge_sw_en"
+#define CHG_DET1 			"chg_det1"
+#define CHG_DET2 			"chg_det2"
+static int gpio_chg_det1 = 0;
+static int gpio_chg_det2 = 0;
+static int gpio_charge_swen = 0;
+
+enum zte_chg_switch_type {
+	ZTE_CHG_NONE,
+	ZTE_CHG_WIRELESS,
+	ZTE_CHG_WIRE,
+	ZTE_CHG_BOTH,
+	ZTE_CHG_INVALIDE,
+};
+
+static int zte_chg_switch_init(void)
+{
+	int rc;
+	
+	gpio_charge_swen = get_sysnumber_byname(CHARGE_SW_EN);
+#if 0
+	rc=gpio_request(gpio_charge_swen, CHARGE_SW_EN);
+	if (rc) {
+    		pr_info("%s: unable to request charge_sw_en(%d)\n",
+    					__func__, rc);
+    		return -EIO;
+    	}
+#endif	
+	gpio_chg_det1 = get_sysnumber_byname(CHG_DET1);
+	rc=gpio_request(gpio_chg_det1, CHG_DET1);
+	if (rc) {
+    		pr_info("%s: unable to request chg_det1(%d)\n",
+    					__func__, rc);
+    		return -EIO;
+    	}
+
+	gpio_chg_det2 = get_sysnumber_byname(CHG_DET2);
+	rc=gpio_request(gpio_chg_det2, CHG_DET2);
+	if (rc) {
+    		pr_info("%s: unable to request chg_det2 (%d)\n",
+    					__func__, rc);
+    		return -EIO;
+    	}
+	pr_info("end\n");
+	return 0;
+}
+
+static int wireless_test = 0;
+module_param(wireless_test, int, 0644);
+
+/*
+mos fet:
+GPIO119 high---wired charge
+GPIO120 high---wireless charge
+ */
+static enum zte_chg_switch_type zte_get_chg_type(void)
+{	
+	int wireless = -1;
+	int wired = -1;
+	static bool initialized = false;
+
+	might_sleep();
+	
+	if (!initialized) {		
+		int rc = zte_chg_switch_init();
+		if (rc) {
+			pr_info("zte_chg_switch_init error\n");
+			return ZTE_CHG_INVALIDE;
+		}
+		initialized = true;
+	}
+		
+	wired = gpio_get_value_cansleep(gpio_chg_det1);
+	wireless = gpio_get_value_cansleep(gpio_chg_det2);
+	pr_info("wired=%d wireless=%d\n",wired,wireless);
+	
+	//this if is always True
+	if (wireless_test == 0)
+		return ZTE_CHG_INVALIDE;
+	if (!wireless && !wired)
+		return ZTE_CHG_WIRELESS;
+	else
+		return ZTE_CHG_WIRE;
+}
+//this function may called in msm_otg
+bool is_only_wireless_charge(void)
+{
+	return (zte_get_chg_type()==ZTE_CHG_WIRELESS);
+}
+#else
+//this function may called in msm_otg
+bool is_only_wireless_charge(void)
+{
+	return false;
+}
+#endif
 
 static inline int
 get_bpd(const char *name)
@@ -527,6 +787,7 @@ qpnp_chg_masked_write(struct qpnp_chg_chip *chip, u16 base,
 static void
 qpnp_chg_enable_irq(struct qpnp_chg_irq *irq)
 {
+	pr_info("irq: %d\n", irq->irq);
 	if (__test_and_clear_bit(0, &irq->disabled)) {
 		pr_debug("number = %d\n", irq->irq);
 		enable_irq(irq->irq);
@@ -536,6 +797,7 @@ qpnp_chg_enable_irq(struct qpnp_chg_irq *irq)
 static void
 qpnp_chg_disable_irq(struct qpnp_chg_irq *irq)
 {
+	pr_info("irq: %d\n", irq->irq);
 	if (!__test_and_set_bit(0, &irq->disabled)) {
 		pr_debug("number = %d\n", irq->irq);
 		disable_irq_nosync(irq->irq);
@@ -668,6 +930,23 @@ qpnp_chg_is_usb_chg_plugged_in(struct qpnp_chg_chip *chip)
 	pr_debug("chgr usb sts 0x%x\n", usb_chgpth_rt_sts);
 
 	return (usb_chgpth_rt_sts & USBIN_VALID_IRQ) ? 1 : 0;
+}
+
+static int
+qpnp_chg_is_fast_chg_on(struct qpnp_chg_chip *chip) // Function is added by zte
+{
+	u8 fast_irq_rt_sts;
+	int rc;
+
+	if (!chip->chgr_base)
+		return 0;
+	rc = qpnp_chg_read(chip, &fast_irq_rt_sts, INT_RT_STS(chip->chgr_base), 1);
+	if (rc) {
+		pr_err("spmi read failed: addr=%03X, rc=%d\n",
+			INT_RT_STS(chip->chgr_base), rc);
+		return rc;
+	}
+	return (fast_irq_rt_sts & FAST_CHG_ON_IRQ) ? 1 : 0;
 }
 
 static bool
@@ -865,6 +1144,7 @@ qpnp_chg_iusb_trim_set(struct qpnp_chg_chip *chip, int trim)
 {
 	int rc = 0;
 
+	pr_info("trim=0x%x\n",trim);
 	rc = qpnp_chg_masked_write(chip,
 		chip->usb_chgpth_base + SEC_ACCESS,
 		0xFF,
@@ -892,10 +1172,18 @@ qpnp_chg_iusbmax_set(struct qpnp_chg_chip *chip, int mA)
 	int rc = 0;
 	u8 usb_reg = 0, temp = 8;
 
+	pr_info("ZTE chip->maxinput_usb_ma=%d,mA=%d \n",chip->maxinput_usb_ma,mA);
 	if (mA < 0 || mA > QPNP_CHG_I_MAX_MAX_MA) {
 		pr_err("bad mA=%d asked to set\n", mA);
 		return -EINVAL;
 	}
+
+        //zte add
+        if (ext_ovp_present && socinfo_get_ftm_flag()) {
+                if(mA > QPNP_CHG_I_MAX_MIN_150)
+                        mA = QPNP_CHG_I_MAX_MIN_150;
+	}
+	//zte add, end
 
 	if (mA <= QPNP_CHG_I_MAX_MIN_100) {
 		usb_reg = 0x00;
@@ -1130,14 +1418,26 @@ qpnp_chg_charge_en(struct qpnp_chg_chip *chip, int enable)
 }
 
 static int
+qpnp_chg_charge_en_state(struct qpnp_chg_chip *chip)
+{
+	u8 charge_en_state = 0;
+	int rc = 0;
+	
+	rc = qpnp_chg_read(chip, &charge_en_state, chip->chgr_base + CHGR_CHG_CTRL, 1);
+	return charge_en_state & CHGR_CHG_EN;
+}
+
+static int
 qpnp_chg_force_run_on_batt(struct qpnp_chg_chip *chip, int disable)
 {
 	/* Don't run on battery for batteryless hardware */
 	if (chip->use_default_batt_values)
 		return 0;
 	/* Don't force on battery if battery is not present */
+#if 0	//zte jiangfeng remove for irq when usb removed
 	if (!qpnp_chg_is_batt_present(chip))
 		return 0;
+#endif
 
 	/* This bit forces the charger to run off of the battery rather
 	 * than a connected charger */
@@ -1275,7 +1575,7 @@ qpnp_chg_vbatdet_lo_irq_handler(int irq, void *_chip)
 	u8 chg_sts = 0;
 	int rc;
 
-	pr_debug("vbatdet-lo triggered\n");
+	pr_info("vbatdet-lo triggered\n");
 
 	rc = qpnp_chg_read(chip, &chg_sts, INT_RT_STS(chip->chgr_base), 1);
 	if (rc)
@@ -1302,6 +1602,37 @@ qpnp_chg_vbatdet_lo_irq_handler(int irq, void *_chip)
 	return IRQ_HANDLED;
 }
 
+//zte jiangfeng add
+#define ZTE_DEFAULT_SAFETY_MINUTES	430
+#define ZTE_IGNORE_FAIL_NUM			2
+static int zte_num_chgfail	=	0;
+static int tchg_mins = ZTE_DEFAULT_SAFETY_MINUTES;
+module_param(tchg_mins, int, 0644);
+#define CHGR_CHG_FAILED_BIT	BIT(7)
+
+static int qpnp_chg_tchg_max_set(struct qpnp_chg_chip *chip, int minutes);
+
+static int pm_chg_failed_clear(struct qpnp_chg_chip *chip, int clear)
+{
+	int rc;
+	pr_info("\n");	
+	rc = qpnp_chg_masked_write(chip,
+		chip->chgr_base + CHGR_CHG_FAILED,
+		CHGR_CHG_FAILED_BIT,
+		CHGR_CHG_FAILED_BIT, 1);
+	if (rc)
+		printk("Failed to write chg_fail clear bit!\n");
+	
+	rc = qpnp_chg_masked_write(chip,
+		chip->chgr_base + CHGR_ATC_FAILED,
+		CHGR_CHG_FAILED_BIT,
+		CHGR_CHG_FAILED_BIT, 1);
+	if (rc)
+		printk("Failed to write chg_fail clear bit!\n");
+	return rc;
+}
+//zte jiangfeng add, end
+
 #define ARB_STOP_WORK_MS	1000
 static irqreturn_t
 qpnp_chg_usb_chg_gone_irq_handler(int irq, void *_chip)
@@ -1315,6 +1646,21 @@ qpnp_chg_usb_chg_gone_irq_handler(int irq, void *_chip)
 	if (rc)
 		pr_err("failed to read usb_chgpth_sts rc=%d\n", rc);
 
+	pr_info("chg_gone triggered\n");
+        //zte jiangfeng add	
+        {
+	    	rc = pm_chg_failed_clear(chip, 1);
+	    	if (rc)
+			pr_err("Failed to write CHGR_CHG_FAILED_BIT\n");
+	    	rc = qpnp_chg_tchg_max_set(chip, tchg_mins);
+	    	if (rc) {
+			pr_err("Failed to set max time to %d minutes rc=%d\n",
+							tchg_mins, (rc));
+		}
+		zte_num_chgfail =	0;
+		pr_info("zte_num_chgfail=0\n");
+	}
+    	//zte jiangfeng add, end
 	pr_debug("chg_gone triggered\n");
 	if ((qpnp_chg_is_usb_chg_plugged_in(chip)
 			|| qpnp_chg_is_dc_chg_plugged_in(chip))
@@ -1333,7 +1679,7 @@ qpnp_chg_usb_usb_ocp_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_chg_chip *chip = _chip;
 
-	pr_debug("usb-ocp triggered\n");
+	pr_info("usb-ocp triggered\n");
 
 	schedule_work(&chip->ocp_clear_work);
 
@@ -1472,6 +1818,14 @@ qpnp_chg_vddmax_get(struct qpnp_chg_chip *chip)
 static void
 qpnp_chg_set_appropriate_vddmax(struct qpnp_chg_chip *chip)
 {
+	pr_info("is_cool=%d is_warm=%d cool_bat_mv=%dmv warm_bat_mv=%dmv max_voltage_mv=%dmv delta_vddmax_mv=%dmv\n",
+			chip->bat_is_cool,
+			chip->bat_is_warm,
+			chip->cool_bat_mv,
+			chip->warm_bat_mv,
+			chip->max_voltage_mv,
+			chip->delta_vddmax_mv
+			);
 	if (chip->bat_is_cool)
 		qpnp_chg_vddmax_and_trim_set(chip, chip->cool_bat_mv,
 				chip->delta_vddmax_mv);
@@ -1531,7 +1885,7 @@ qpnp_chg_coarse_det_usb_irq_handler(int irq, void *_chip)
 
 	host_mode = qpnp_chg_is_otg_en_set(chip);
 	usb_coarse_det = qpnp_chg_check_usb_coarse_det(chip);
-	pr_debug("usb coarse-det triggered: %d host_mode: %d\n",
+	pr_info("usb coarse-det triggered: %d host_mode: %d\n",
 			usb_coarse_det, host_mode);
 
 	if (host_mode)
@@ -1598,6 +1952,28 @@ qpnp_chg_regulator_batfet_set(struct qpnp_chg_chip *chip, bool enable)
 	return rc;
 }
 
+static int charger_present = 0;    //ZTE
+static int charger_present_get(char *buf, struct kernel_param *kp)
+{
+	int usb_present=qpnp_chg_is_usb_chg_plugged_in(zte_chip);
+
+	if(usb_present ^ zte_chip->usb_present)
+	{
+		zte_chip->usb_present = usb_present;
+		pr_info("ZTE chip->chg_done=%d,now usb_present=%d,old chip->usb_present=%d \n",
+		      zte_chip->chg_done,
+		      usb_present,
+		      zte_chip->usb_present); //XJB
+	}
+
+	if (zte_chip->usb_present)
+		charger_present=1;
+	else
+		charger_present=0;
+	return sprintf(buf,"%d",charger_present);
+}
+module_param_call(charger_present, NULL,charger_present_get,&charger_present, 0644);
+
 #define USB_WALL_THRESHOLD_MA	500
 #define ENUM_T_STOP_BIT		BIT(0)
 #define USB_5V_UV	5000000
@@ -1611,7 +1987,7 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 
 	usb_present = qpnp_chg_is_usb_chg_plugged_in(chip);
 	host_mode = qpnp_chg_is_otg_en_set(chip);
-	pr_debug("usbin-valid triggered: %d host_mode: %d\n",
+	pr_info("usbin-valid triggered: %d host_mode: %d\n",
 		usb_present, host_mode);
 
 	/* In host mode notifications cmoe from USB supply */
@@ -1620,7 +1996,10 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 
 	if (chip->usb_present ^ usb_present) {
 		chip->usb_present = usb_present;
+		wake_lock_timeout(&chip->charger_wake_lock, 5 * HZ);	//zte add
 		if (!usb_present) {
+			if (ext_ovp_present && socinfo_get_ftm_flag())
+				zte_ext_ovp_disable();							//zte jiangfeng add for A64
 			/* when a valid charger inserted, and increase the
 			 *  charger voltage to OVP threshold, then
 			 *  usb_in_valid falling edge interrupt triggers.
@@ -1654,7 +2033,11 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 			qpnp_chg_iusbmax_set(chip, QPNP_CHG_I_MAX_MIN_100);
 			chip->prev_usb_max_ma = -EINVAL;
 			chip->aicl_settled = false;
+			wake_unlock(&chip->charger_fulled_lock);	//zte add
 		} else {
+			if (ext_ovp_present && socinfo_get_ftm_flag())
+				zte_ext_ovp_enable();							//zte jiangfeng add for A64
+		        wake_lock(&chip->charger_fulled_lock);		//zte add
 			/* when OVP clamped usbin, and then decrease
 			 * the charger voltage to lower than the OVP
 			 * threshold, a usbin_valid rising edge
@@ -1684,9 +2067,15 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 				msecs_to_jiffies(EOC_CHECK_PERIOD_MS));
 			schedule_work(&chip->soc_check_work);
 		}
+#if defined(CONFIG_TOUCHSCREEN_FT5X06_ZTE)
+					schedule_delayed_work(&chip->ts_usbdet_notify_work,
+					round_jiffies_relative(msecs_to_jiffies
+						(200)));
+#endif			
 
 		power_supply_set_present(chip->usb_psy, chip->usb_present);
 		schedule_work(&chip->batfet_lcl_work);
+		power_supply_changed(&chip->batt_psy);//zte add
 	}
 
 	return IRQ_HANDLED;
@@ -1701,7 +2090,8 @@ qpnp_chg_bat_if_batt_temp_irq_handler(int irq, void *_chip)
 	int batt_temp_good, batt_present, rc;
 
 	batt_temp_good = qpnp_chg_is_batt_temp_ok(chip);
-	pr_debug("batt-temp triggered: %d\n", batt_temp_good);
+	pr_info("temperture is %s\n", batt_temp_good?"good":"bad");
+	pr_info("batt-temp triggered: %d\n", batt_temp_good);
 
 	batt_present = qpnp_chg_is_batt_present(chip);
 	if (batt_present) {
@@ -1736,7 +2126,8 @@ qpnp_chg_bat_if_batt_pres_irq_handler(int irq, void *_chip)
 	int batt_present, batt_temp_good, rc;
 
 	batt_present = qpnp_chg_is_batt_present(chip);
-	pr_debug("batt-pres triggered: %d\n", batt_present);
+	pr_info("batt-pres triggered: %d\n", batt_present);
+	pr_info("battery is  %s\n", batt_present?"present":"not present");
 
 	if (chip->batt_present ^ batt_present) {
 		if (batt_present) {
@@ -1808,7 +2199,8 @@ qpnp_chg_dc_dcin_valid_irq_handler(int irq, void *_chip)
 	int dc_present;
 
 	dc_present = qpnp_chg_is_dc_chg_plugged_in(chip);
-	pr_debug("dcin-valid triggered: %d\n", dc_present);
+	pr_info("dcin-valid triggered: %d\n", dc_present);
+	pr_info("dc is  %s\n", dc_present?"present":"not present");
 
 	if (chip->dc_present ^ dc_present) {
 		chip->dc_present = dc_present;
@@ -1861,14 +2253,30 @@ qpnp_chg_chgr_chg_failed_irq_handler(int irq, void *_chip)
 	struct qpnp_chg_chip *chip = _chip;
 	int rc;
 
-	pr_debug("chg_failed triggered\n");
-
+	pr_info("chg_failed triggered\n");
+#if 0
 	rc = qpnp_chg_masked_write(chip,
 		chip->chgr_base + CHGR_CHG_FAILED,
 		CHGR_CHG_FAILED_BIT,
 		CHGR_CHG_FAILED_BIT, 1);
 	if (rc)
 		pr_err("Failed to write chg_fail clear bit!\n");
+#endif
+    //zte jiangfeng add
+	pr_info("zte_num_chgfail=%d\n",zte_num_chgfail);
+	if(zte_num_chgfail < ZTE_IGNORE_FAIL_NUM)
+	{
+		rc = pm_chg_failed_clear(chip, 1);
+		if (rc)
+			pr_err("Failed to write CHGR_CHG_FAILED_BIT\n");
+		rc = qpnp_chg_tchg_max_set(chip, tchg_mins);
+		if (rc) {
+			pr_err("Failed to set max time to %d minutes rc=%d\n",
+							tchg_mins, (rc));
+		}
+		zte_num_chgfail++;
+	}
+    //zte jiangfeng add, end
 
 	if (chip->bat_if_base) {
 		pr_debug("psy changed batt_psy\n");
@@ -1888,7 +2296,7 @@ qpnp_chg_chgr_chg_trklchg_irq_handler(int irq, void *_chip)
 {
 	struct qpnp_chg_chip *chip = _chip;
 
-	pr_debug("TRKL IRQ triggered\n");
+	pr_info("TRKL IRQ triggered\n");
 
 	chip->chg_done = false;
 	if (chip->bat_if_base) {
@@ -1946,7 +2354,34 @@ qpnp_chg_chgr_chg_fastchg_irq_handler(int irq, void *_chip)
 
 	fastchg_on = qpnp_chg_is_fastchg_on(chip);
 
-	pr_debug("FAST_CHG IRQ triggered, fastchg_on: %d\n", fastchg_on);
+	pr_info("FAST_CHG IRQ triggered, fastchg_on: %d\n", fastchg_on);
+	//zte add 
+	if (ext_ovp_present) {
+		int fast_chg_on = qpnp_chg_is_fast_chg_on(chip);
+		union power_supply_propval ret = {0,};
+		if (chip-> fast_chg_on ^ fast_chg_on)
+		{
+			if (fast_chg_on)
+			{
+				if (qpnp_chg_is_usb_chg_plugged_in(chip)) {
+					chip->usb_psy->get_property(chip->usb_psy, POWER_SUPPLY_PROP_CURRENT_MAX, &ret);
+					if ( ((ret.intval / 1000) > USB_WALL_THRESHOLD_MA) || socinfo_get_ftm_flag() )
+					{
+						/* ToDo: Change EXT_OVP_EN (GPIO) to 1 */
+						zte_ext_ovp_enable();
+					}
+				}
+			} else {
+				/* ToDo: Change EXT_OVP_EN (GPIO) to 0 */
+				zte_ext_ovp_disable();
+			}
+			chip-> fast_chg_on = fast_chg_on;
+			/*Mask QC sample code to let procedure go down to original codes@zte*/
+			//if (!fast_chg_on)
+			//	return IRQ_HANDLED;
+		}
+	}
+	//zte add end
 
 	if (chip->fastchg_on ^ fastchg_on) {
 		chip->fastchg_on = fastchg_on;
@@ -2208,8 +2643,6 @@ static char *pm_batt_supplied_to[] = {
 static int charger_monitor;
 module_param(charger_monitor, int, 0644);
 
-static int ext_ovp_present;
-module_param(ext_ovp_present, int, 0444);
 
 #define OVP_USB_WALL_TRSH_MA	200
 static int
@@ -2250,7 +2683,7 @@ qpnp_aicl_check_work(struct work_struct *work)
 		chip->usb_psy->get_property(chip->usb_psy,
 			  POWER_SUPPLY_PROP_CURRENT_MAX, &ret);
 		if ((ret.intval / 1000) > USB_WALL_THRESHOLD_MA) {
-			pr_debug("no charger_monitor present set iusbmax %d\n",
+			pr_info("no charger_monitor present set iusbmax %d\n",
 					ret.intval / 1000);
 			qpnp_chg_iusbmax_set(chip, ret.intval / 1000);
 		}
@@ -2309,13 +2742,21 @@ get_prop_batt_health(struct qpnp_chg_chip *chip)
 		pr_err("Couldn't read battery health read failed rc=%d\n", rc);
 		return POWER_SUPPLY_HEALTH_UNKNOWN;
 	};
-
+#if 0
 	if (BATT_TEMP_OK & batt_health)
 		return POWER_SUPPLY_HEALTH_GOOD;
 	if (BATT_TEMP_HOT & batt_health)
 		return POWER_SUPPLY_HEALTH_OVERHEAT;
 	else
 		return POWER_SUPPLY_HEALTH_COLD;
+#else
+	if ((BATT_TEMP_OK & batt_health) && !chip->bat_is_hot)
+		return POWER_SUPPLY_HEALTH_GOOD;
+	if ((BATT_TEMP_HOT & batt_health) || chip->bat_is_hot)
+		return POWER_SUPPLY_HEALTH_OVERHEAT;
+	else
+		return POWER_SUPPLY_HEALTH_COLD;
+#endif
 }
 
 static int
@@ -2446,22 +2887,37 @@ get_prop_charge_full(struct qpnp_chg_chip *chip)
 	return 0;
 }
 
+static int enable_to_shutdown=1;    //ZTE add
+#define DEFAULT_CAPACITY	50
 static int
 get_prop_capacity(struct qpnp_chg_chip *chip)
 {
+	static bool zero_reported = false;
 	union power_supply_propval ret = {0,};
 	int battery_status, bms_status, soc, charger_in;
-
+	
+#if SOFT_CC_DEBUG
+	pr_info("soft_cc debugging\n");
+#else
 	if (chip->fake_battery_soc >= 0)
 		return chip->fake_battery_soc;
-
+#endif
 	if (chip->use_default_batt_values || !get_prop_batt_present(chip))
 		return DEFAULT_CAPACITY;
+
+	if (zero_reported) {
+		pr_info("ZERO reported already, just return 0 directly\n");
+		return 0;
+	}
 
 	if (chip->bms_psy) {
 		chip->bms_psy->get_property(chip->bms_psy,
 				POWER_SUPPLY_PROP_CAPACITY, &ret);
 		soc = ret.intval;
+#if SOFT_CC_DEBUG
+		if (chip->fake_battery_soc >= 0)
+			soc = chip->fake_battery_soc;
+#endif
 		battery_status = get_prop_batt_status(chip);
 		chip->bms_psy->get_property(chip->bms_psy,
 				POWER_SUPPLY_PROP_STATUS, &ret);
@@ -2478,16 +2934,49 @@ get_prop_capacity(struct qpnp_chg_chip *chip)
 				&& !chip->charging_disabled
 				&& chip->soc_resume_limit
 				&& soc <= chip->soc_resume_limit) {
-			pr_debug("resuming charging at %d%% soc\n", soc);
-			chip->resuming_charging = true;
-			qpnp_chg_irq_wake_enable(&chip->chg_fastchg);
-			qpnp_chg_set_appropriate_vbatdet(chip);
-			qpnp_chg_charge_en(chip, !chip->charging_disabled);
+			do {
+			#if 1//zte add
+				/*
+				  * if the resuming charing is occour with cool or warm,
+				  * Need check the voltage.
+				  */
+				if (chip->bat_is_cool || chip->bat_is_warm) {
+					int vol_now = get_prop_battery_voltage_now(chip)/1000;
+					if (vol_now>=3950) {
+						pr_info("No-resuming charging in cool-warm,%dmV(%d)\n", vol_now, soc);
+						break;
+					} else
+						pr_info("resuming charging in cool-warm,%dmV(%d)\n", vol_now, soc);
+				}
+			#endif
+				pr_info("resuming charging at %d%% soc\n", soc);
+				chip->resuming_charging = true;
+                                qpnp_chg_irq_wake_enable(&chip->chg_fastchg);
+				qpnp_chg_set_appropriate_vbatdet(chip);
+				qpnp_chg_charge_en(chip, !chip->charging_disabled);
+			} while(0);
 		}
 		if (soc == 0) {
 			if (!qpnp_chg_is_usb_chg_plugged_in(chip)
 				&& !qpnp_chg_is_usb_chg_plugged_in(chip))
 				pr_warn_ratelimited("Battery 0, CHG absent\n");
+			//zte add
+			if(!enable_to_shutdown)
+			{
+				return 1;
+			}
+			
+			/*
+			  * ZTE:when charger in and the soc=0,we need to do a 60s check for this situation.
+			  * If after 60s monitor, the soft_cc_toal is still positive, that means the charger
+			  * can't change in anymore, report zero to uplayer.
+			  */
+			if (qpnp_chg_is_usb_chg_plugged_in(chip)) {				
+				soc = soft_cc_adjust_soc(chip);
+				if (soc == 0)
+					zero_reported = true;
+			}
+			//zte add, end
 		}
 		return soc;
 	} else {
@@ -2565,6 +3054,7 @@ qpnp_batt_external_power_changed(struct power_supply *psy)
 
 	chip->usb_psy->get_property(chip->usb_psy,
 			  POWER_SUPPLY_PROP_ONLINE, &ret);
+	pr_info("enter+++++\n");
 
 	/* Only honour requests while USB is present */
 	if (qpnp_chg_is_usb_chg_plugged_in(chip)) {
@@ -2575,6 +3065,12 @@ qpnp_batt_external_power_changed(struct power_supply *psy)
 			goto skip_set_iusb_max;
 
 		chip->prev_usb_max_ma = ret.intval;
+
+		/*ZTE: Add for power on by charger without battery*/
+		if (!get_prop_batt_present(chip) && (!socinfo_get_ftm_flag()) ) {
+			pr_info("batt not present and ret,intval=%d,return\n",ret.intval);
+			return;
+		}
 
 		if (ret.intval <= 2 && !chip->use_default_batt_values &&
 						get_prop_batt_present(chip)) {
@@ -2618,8 +3114,8 @@ qpnp_batt_external_power_changed(struct power_supply *psy)
 
 skip_set_iusb_max:
 	pr_debug("end of power supply changed\n");
-	pr_debug("psy changed batt_psy\n");
-	power_supply_changed(&chip->batt_psy);
+	//pr_debug("psy changed batt_psy\n");
+	//power_supply_changed(&chip->batt_psy);
 }
 
 static int
@@ -2713,6 +3209,9 @@ qpnp_batt_power_get_property(struct power_supply *psy,
 	return 0;
 }
 
+extern void set_batt_hot_cold_threshold(unsigned int vbatt_hot_threshold,
+	unsigned int vbatt_cold_threshold);	//zte charge add
+
 #define BTC_CONFIG_ENABLED	BIT(7)
 #define BTC_COLD		BIT(1)
 #define BTC_HOT			BIT(0)
@@ -2740,6 +3239,12 @@ qpnp_chg_bat_if_configure_btc(struct qpnp_chg_chip *chip)
 	if (chip->btc_disabled)
 		mask |= BTC_CONFIG_ENABLED;
 
+	//zte charge add
+	set_batt_hot_cold_threshold(chip->hot_batt_p, chip->cold_batt_p);
+	printk("hot threshold %d percent, cold threshold %d percent, btc %s\n",
+		chip->hot_batt_p, chip->cold_batt_p, chip->btc_disabled?"disabled":"enabled");
+	//zte charge add, end
+	
 	return qpnp_chg_masked_write(chip,
 			chip->bat_if_base + BAT_IF_BTC_CTRL,
 			mask, btc_cfg, 1);
@@ -3452,6 +3957,11 @@ qpnp_eoc_work(struct work_struct *work)
 	u8 batt_sts = 0, buck_sts = 0, chg_sts = 0;
 	bool vbat_lower_than_vbatdet;
 
+	//zte jiangfeng add set full when capacity is full while booting
+	static bool firsttime = true;
+	int capacity = 0;
+	//zte jiangfeng add, end
+
 	pm_stay_awake(chip->dev);
 	qpnp_chg_charge_en(chip, !chip->charging_disabled);
 
@@ -3478,7 +3988,7 @@ qpnp_eoc_work(struct work_struct *work)
 
 	if (!qpnp_chg_is_usb_chg_plugged_in(chip) &&
 			!qpnp_chg_is_dc_chg_plugged_in(chip)) {
-		pr_debug("no chg connected, stopping\n");
+		pr_info("no chg connected, stopping\n");
 		goto stop_eoc;
 	}
 
@@ -3501,7 +4011,7 @@ qpnp_eoc_work(struct work_struct *work)
 					chip->vbatdet_max_err_mv,
 					vbat_low_count);
 			if (vbat_low_count >= CONSECUTIVE_COUNT) {
-				pr_debug("woke up too early stopping\n");
+				pr_info("woke up too early stopping\n");
 				qpnp_chg_enable_irq(&chip->chg_vbatdet_lo);
 				goto stop_eoc;
 			} else {
@@ -3514,14 +4024,16 @@ qpnp_eoc_work(struct work_struct *work)
 		if (buck_sts & VDD_LOOP_IRQ)
 			qpnp_chg_adjust_vddmax(chip, vbat_mv);
 
+		pr_info("ibat_ma: %d term_current =%d,vbat_mv=%d\n",
+			ibat_ma, chip->term_current,vbat_mv);
 		if (!(buck_sts & VDD_LOOP_IRQ)) {
-			pr_debug("Not in CV\n");
+			pr_info("Not in CV\n");
 			count = 0;
 		} else if ((ibat_ma * -1) > chip->term_current) {
-			pr_debug("Not at EOC, battery current too high\n");
+			pr_info("Not at EOC, battery current too high\n");
 			count = 0;
 		} else if (ibat_ma > 0) {
-			pr_debug("Charging but system demand increased\n");
+			pr_info("Charging but system demand increased\n");
 			count = 0;
 		} else {
 			if (count == CONSECUTIVE_COUNT) {
@@ -3547,11 +4059,17 @@ qpnp_eoc_work(struct work_struct *work)
 				goto stop_eoc;
 			} else {
 				count += 1;
-				pr_debug("EOC count = %d\n", count);
+				pr_info("EOC count = %d\n", count);
 			}
 		}
 	} else {
-		pr_debug("not charging\n");
+		pr_info("not charging\n");
+		//zte jiangfeng add set full when capacity is full while booting
+		capacity = get_prop_capacity(chip);
+		if(firsttime && (capacity == 100))
+			chip->chg_done = true;
+		firsttime = false;
+		//zte jiangfeng add, end
 		goto stop_eoc;
 	}
 
@@ -3600,13 +4118,20 @@ qpnp_chg_soc_check_work(struct work_struct *work)
 
 	get_prop_capacity(chip);
 }
+//zte add
+#if defined(CONFIG_BOARD_DRACONIS) || defined(CONFIG_BOARD_WARP4)
+#define ZTE_HOT_TEMP_DEFAULT    500
+#else 
+#define ZTE_HOT_TEMP_DEFAULT    600
+#endif
+int zte_hot_batt_temp  = ZTE_HOT_TEMP_DEFAULT;
 
 #define HYSTERISIS_DECIDEGC 20
 static void
 qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 {
 	struct qpnp_chg_chip *chip = ctx;
-	bool bat_warm = 0, bat_cool = 0;
+	bool bat_warm = false, bat_cool = false, bat_hot = false;
 	int temp;
 
 	if (state >= ADC_TM_STATE_NUM) {
@@ -3618,6 +4143,78 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 
 	pr_debug("temp = %d state = %s\n", temp,
 			state == ADC_TM_WARM_STATE ? "warm" : "cool");
+
+	if (temp > 800)
+		temp = 800;
+	if (temp < -300)
+		temp = -300;
+
+	mutex_lock(&chip->jeita_configure_lock);
+	if (state == ADC_TM_WARM_STATE) {			//warm notification
+		if(chip->bat_is_hot == false && chip->bat_is_warm == false && chip->bat_is_cool == true)	//cool to normal
+		{
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = false;
+			chip->adc_param.low_temp = chip->cool_bat_decidegc;
+			chip->adc_param.high_temp = chip->warm_bat_decidegc;
+			chip->adc_param.state_request =
+					ADC_TM_HIGH_LOW_THR_ENABLE;
+		}
+		else if(chip->bat_is_hot == false && chip->bat_is_warm == false && chip->bat_is_cool == false) //normal to warm
+		{
+			bat_hot = false;
+			bat_warm = true;
+			bat_cool = false;
+			chip->adc_param.low_temp =chip->warm_bat_decidegc-HYSTERISIS_DECIDEGC;
+			chip->adc_param.high_temp = zte_hot_batt_temp;
+			chip->adc_param.state_request =
+					ADC_TM_HIGH_LOW_THR_ENABLE;
+		}
+		else if(chip->bat_is_hot == false && chip->bat_is_warm == true && chip->bat_is_cool == false)		//warm to hot
+		{
+			bat_hot = true;
+			bat_warm = false;
+			bat_cool = false;
+			chip->adc_param.low_temp =zte_hot_batt_temp-HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+					ADC_TM_COOL_THR_ENABLE;
+		}
+	}
+	else{										//cool notification
+		if(chip->bat_is_hot == false	&& chip->bat_is_warm == false && chip->bat_is_cool == false)	//normal to cool
+		{
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = true;
+			chip->adc_param.high_temp =chip->cool_bat_decidegc+HYSTERISIS_DECIDEGC;
+			chip->adc_param.state_request =
+					ADC_TM_WARM_THR_ENABLE;
+		}
+		else if(chip->bat_is_hot == false	&& chip->bat_is_warm == true && chip->bat_is_cool == false)	//warm to normal
+		{
+			bat_hot = false;
+			bat_warm = false;
+			bat_cool = false;
+			chip->adc_param.low_temp =chip->cool_bat_decidegc;
+			chip->adc_param.high_temp = chip->warm_bat_decidegc;
+			chip->adc_param.state_request =
+					ADC_TM_HIGH_LOW_THR_ENABLE;
+		}
+		else if(chip->bat_is_hot == true	&& chip->bat_is_warm == false && chip->bat_is_cool == false)	//hot to warm
+		{
+			bat_hot = false;
+			bat_warm = true;
+			bat_cool = false;
+			chip->adc_param.low_temp =chip->warm_bat_decidegc-HYSTERISIS_DECIDEGC;
+			chip->adc_param.high_temp = zte_hot_batt_temp;
+			chip->adc_param.state_request =
+					ADC_TM_HIGH_LOW_THR_ENABLE;
+		}
+	}
+
+	pr_info("temp = %d bat_cool = %d,bat_warm = %d, bat_hot = %d\n",temp,bat_cool,bat_warm,bat_hot);
+#if 0
 
 	if (state == ADC_TM_WARM_STATE) {
 		if (temp >= chip->warm_bat_decidegc) {
@@ -3660,7 +4257,7 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 					ADC_TM_HIGH_LOW_THR_ENABLE;
 		}
 	}
-
+#endif
 	if (chip->bat_is_cool ^ bat_cool || chip->bat_is_warm ^ bat_warm) {
 		chip->bat_is_cool = bat_cool;
 		chip->bat_is_warm = bat_warm;
@@ -3692,7 +4289,32 @@ qpnp_chg_adc_notification(enum qpnp_tm_state state, void *ctx)
 			qpnp_chg_set_appropriate_battery_current(chip);
 		}
 	}
+#if 1
+	/**
+	  * Hot Temp Procedure(ZTE)
+	  *
+	  * add for stop charging when hot temp,
+	  * only called when status changed
+	  */
 
+	if (chip->bat_is_hot ^ bat_hot) {
+		chip->bat_is_hot = bat_hot;
+		chip->charging_disabled = bat_hot;
+
+		if (chip->charging_disabled) {
+			/* disable charging */
+			qpnp_chg_charge_en(chip, !chip->charging_disabled);
+			qpnp_chg_force_run_on_batt(chip,
+						chip->charging_disabled);
+		} else {
+			/* enable charging */
+			qpnp_chg_force_run_on_batt(chip,
+					chip->charging_disabled);
+			qpnp_chg_charge_en(chip, !chip->charging_disabled);
+		}
+	}
+	mutex_unlock(&chip->jeita_configure_lock);
+#endif
 	pr_debug("warm %d, cool %d, low = %d deciDegC, high = %d deciDegC\n",
 			chip->bat_is_warm, chip->bat_is_cool,
 			chip->adc_param.low_temp, chip->adc_param.high_temp);
@@ -3904,7 +4526,7 @@ qpnp_chg_reduce_power_stage(struct qpnp_chg_chip *chip)
 		count_reduce_power_stage = 0;
 	}
 
-	pr_debug("power_stage_hw = %d reduce_power_stage = %d usb_present = %d usb_ma_above_wall = %d vbat_uv(16) = %d vusb_uv(16) = %d fast_chg = %d , ichg = %d, vchg = %d, restore,reduce = %d, %d\n",
+	pr_info("power_stage_hw = %d reduce_power_stage = %d usb_present = %d usb_ma_above_wall = %d vbat_uv(16) = %d vusb_uv(16) = %d fast_chg = %d , ichg = %d, vchg = %d, restore,reduce = %d, %d\n",
 			power_stage_reduced_in_hw, reduce_power_stage,
 			usb_present, usb_ma_above_wall,
 			vbat_uv, vusb_uv, fast_chg,
@@ -4044,10 +4666,21 @@ qpnp_batt_power_set_property(struct power_supply *psy,
 		qpnp_batt_system_temp_level_set(chip, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
-		if (qpnp_chg_is_usb_chg_plugged_in(chip) &&
-			!(qpnp_is_dc_higher_prio(chip)
-			&& qpnp_chg_is_dc_chg_plugged_in(chip)))
+#if 0
+		if (qpnp_chg_is_usb_chg_plugged_in(chip))
 			qpnp_chg_iusbmax_set(chip, val->intval / 1000);
+#else//zte
+		if (qpnp_chg_is_usb_chg_plugged_in(chip)) {
+			int mA = val->intval / 1000;
+			if ( mA <= QPNP_CHG_I_MAX_MIN_150 )
+			{
+				pr_info("ext_ovp open, forbide the iusbmax set to %d\n",mA);
+				zte_ext_ovp_disable();
+				mA = 500;
+			}	
+			qpnp_chg_iusbmax_set(chip, mA);
+		}
+#endif
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_TRIM:
 		qpnp_chg_iusb_trim_set(chip, val->intval);
@@ -4233,8 +4866,9 @@ qpnp_chg_request_irqs(struct qpnp_chg_chip *chip)
 						chip->batt_pres.irq, rc);
 				return rc;
 			}
-
+#if 0//zte jiangfeng remove
 			qpnp_chg_irq_wake_enable(&chip->batt_pres);
+#endif
 
 			chip->batt_temp_ok.irq = spmi_get_irq_byname(spmi,
 						spmi_resource, "bat-temp-ok");
@@ -4365,7 +4999,7 @@ qpnp_chg_request_irqs(struct qpnp_chg_chip *chip)
 
 	return rc;
 }
-
+#if 0
 static int
 qpnp_chg_load_battery_data(struct qpnp_chg_chip *chip)
 {
@@ -4405,6 +5039,7 @@ qpnp_chg_load_battery_data(struct qpnp_chg_chip *chip)
 
 	return 0;
 }
+#endif
 
 #define WDOG_EN_BIT	BIT(7)
 static int
@@ -4455,6 +5090,7 @@ qpnp_chg_hwinit(struct qpnp_chg_chip *chip, u8 subtype,
 			pr_debug("failed setting ibat_Safe rc=%d\n", rc);
 			return rc;
 		}
+		chip->tchg_mins	=	tchg_mins;		//zte jiangfeng add
 		rc = qpnp_chg_tchg_max_set(chip, chip->tchg_mins);
 		if (rc) {
 			pr_debug("failed setting tchg_mins rc=%d\n", rc);
@@ -4608,8 +5244,8 @@ qpnp_chg_hwinit(struct qpnp_chg_chip *chip, u8 subtype,
 
 		rc = qpnp_chg_masked_write(chip,
 			chip->usb_chgpth_base + USB_OVP_CTL,
-			USB_VALID_DEB_20MS,
-			USB_VALID_DEB_20MS, 1);
+			0x73,
+			0x33, 1);
 
 		rc = qpnp_chg_masked_write(chip,
 			chip->usb_chgpth_base + CHGR_USB_ENUM_T_STOP,
@@ -4796,7 +5432,12 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 
 	ext_ovp_present = of_property_read_bool(chip->spmi->dev.of_node,
 					"qcom,ext-ovp-present");
+	//ext_ovp_present = 1;//zte add for test
 
+	//zte add for battery-switch
+	battery_switch_support = of_property_read_bool(chip->spmi->dev.of_node,
+					"qcom,battery-switch-support");
+					
 	/* Get the charging-disabled property */
 	chip->charging_disabled = of_property_read_bool(chip->spmi->dev.of_node,
 					"qcom,charging-disabled");
@@ -4855,6 +5496,257 @@ qpnp_charger_read_dt_props(struct qpnp_chg_chip *chip)
 	return rc;
 }
 
+/*ZTE:  Soft CC*/
+#define SOFT_CC_NUM 60
+struct qpnp_soft_cc {
+	int data[SOFT_CC_NUM];
+	int pos;
+	int total;
+	bool monitor_launched;
+	bool total_valid;
+};
+
+static struct qpnp_soft_cc soft_cc;
+#if SOFT_CC_DEBUG
+static char debug_buff[1024] = {0};
+#endif
+
+static void soft_cc_append_data(int data)
+{
+	struct qpnp_soft_cc *sc = &soft_cc;
+	
+	int pos = (sc->pos + 1) % SOFT_CC_NUM;
+	int old_data = sc->data[pos];
+
+	if (sc->pos >= SOFT_CC_NUM-1)
+		sc->total_valid= true;
+
+	sc->data[pos] = data;
+	sc->pos = pos;
+	sc->total = sc->total - old_data + data;	
+#if SOFT_CC_DEBUG
+	{
+	int i = 0,cnt = 0;	
+	memset(debug_buff,0,sizeof(debug_buff));
+	for(i = 0; i < SOFT_CC_NUM; i++){	
+		if (i == sc->pos)
+			cnt += sprintf(debug_buff + cnt,"%5d*",sc->data[i]);	
+		else
+			cnt += sprintf(debug_buff + cnt,"%5d ",sc->data[i]);	
+	}
+	pr_info("==soft cc dump==\n");	
+	pr_info("%s\n",debug_buff);
+	pr_info("\ttotal=%d\n",sc->total);
+	pr_info("\tpos=%d\n",sc->pos);
+	pr_info("\ttotal_valid=%d\n",sc->total_valid);
+	pr_info("\tmonitor_launched=%d\n",sc->monitor_launched);
+	}
+#endif
+}
+
+static void soft_cc_reset(void)
+{
+	struct qpnp_soft_cc *sc = &soft_cc;
+	int i = 0;
+	
+	for ( i = 0; i < SOFT_CC_NUM; i++) 
+		sc->data[i] = 0;
+	sc->pos  = -1;
+	sc->total = 0;		
+	sc->total_valid= false;
+	sc->monitor_launched = false;
+}
+
+// this function called when soc=0 and charger in
+static int soft_cc_adjust_soc(struct qpnp_chg_chip *chip)
+{
+	struct qpnp_soft_cc *sc = &soft_cc;
+	
+#if SOFT_CC_DEBUG
+	pr_info("sc->total_valid=%d sc->total=%d \n",sc->total_valid,sc->total);
+#endif
+	if (sc->total_valid && (sc->total > 0)) {
+		pr_info("soc=0 and charger in, soft_cc_total>0, report 0\n");
+		return 0;
+	} else {
+		if (!sc->monitor_launched) {
+			soft_cc_reset();
+			sc->monitor_launched = true;
+			pr_info("soc=0 and charger is in, launching soft_cc_monitor_work\n");
+			schedule_delayed_work(&chip->soft_cc_monitor_work,
+				round_jiffies_relative(msecs_to_jiffies(1000)));
+		}
+		return 1;
+	}
+}
+
+static void soft_cc_monitor(struct work_struct *work)
+{
+	int chg_current = 0;
+	int usb_present = 0;
+	int cap = 0;
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct qpnp_chg_chip *chip = container_of(dwork,
+				struct qpnp_chg_chip, soft_cc_monitor_work);	
+	
+	if(chip == NULL)
+	{
+		pr_err("pmic fatal error:the_chip=null\n!!");
+		return;
+	}
+
+	chg_current  =   get_prop_current_now(chip)/1000;//mA
+	usb_present =   qpnp_chg_is_usb_chg_plugged_in(chip);
+	cap	           =   get_prop_capacity(chip);
+	if ((cap <= 2) &&  usb_present){
+		soft_cc_append_data(chg_current);
+		if (cap != 0)
+			schedule_delayed_work(&chip->soft_cc_monitor_work,
+				      round_jiffies_relative(msecs_to_jiffies
+							     (1000)));
+	} else {
+		soft_cc_reset();
+		pr_info("soft cc reset , cap=%d usb_present=%d\n",cap,usb_present);
+	}
+}
+
+//////////////////
+
+static int get_adc_val(struct qpnp_chg_chip *chip,enum qpnp_vadc_channels channel)
+{
+	int rc = 0;
+	struct qpnp_vadc_result results;
+
+	rc = qpnp_vadc_read(chip->vadc_dev, channel, &results);
+	if (rc) {
+		pr_err("Unable to read USBIN rc=%d\n", rc);
+		return -1;
+	}
+	return (int)(results.physical);
+}
+
+static int heartbeat_ms = 0;
+static int set_heartbeat_ms(const char *val, struct kernel_param *kp)
+{
+	int ret;
+
+	ret = param_set_int(val, kp);
+	if (ret) {
+		pr_err("error setting value %d\n", ret);
+		return ret;
+	}
+	if (zte_chip) {
+		pr_info("set_heartbeat_ms to %d\n", heartbeat_ms);
+		cancel_delayed_work_sync(&zte_chip->update_heartbeat_work);
+		schedule_delayed_work(&zte_chip->update_heartbeat_work,
+				      round_jiffies_relative(msecs_to_jiffies
+							     (heartbeat_ms)));
+		return 0;
+	}
+	return -EINVAL;
+}
+module_param_call(heartbeat_ms, set_heartbeat_ms, param_get_uint,
+					&heartbeat_ms, 0644);
+
+#define LOW_SOC_HEARTBEAT_MS	20000
+#define HEARTBEAT_MS	60000
+extern int offcharging_flag;
+static void update_heartbeat(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct qpnp_chg_chip *chip = container_of(dwork,
+				struct qpnp_chg_chip, update_heartbeat_work);
+        int period = 0;
+	int temp,voltage,cap,status,charge_type,present,chg_current,usb_present;
+	static int old_temp = 0;
+	static int old_cap = 0;
+	static int old_status = 0;
+	static int old_present = 0;
+	static int old_usb_present = 0;
+	static int report_zero_cnt = 0;
+	
+	if(chip==NULL)
+	{
+		pr_err("pmic fatal error:the_chip=null\n!!");
+		return;
+	}
+
+	temp	=	get_prop_batt_temp(chip)/10;
+	voltage		=	get_prop_battery_voltage_now(chip);
+	cap	=	get_prop_capacity(chip);
+	status		=	get_prop_batt_status(chip);
+	charge_type	=	get_prop_charge_type(chip);
+	present		=	get_prop_batt_present(chip);
+	chg_current	=	get_prop_current_now(chip);
+	usb_present =   qpnp_chg_is_usb_chg_plugged_in(chip);
+
+	/*if heatbeat_ms is bigger than 500ms,must output the logs directly.*/
+	if ((heartbeat_ms>=500) || (abs(temp-old_temp) >= 1) || (old_cap != cap) || (old_status != status)
+		|| (old_present != present) || (old_usb_present != usb_present ))
+	{
+		pr_info("***temp=%d,vol=%d,cap=%d,status=%d,chg_state=%d,current=%d,present=%d,usb_present=%d\n",
+			temp,voltage,cap,status,charge_type,chg_current,present,usb_present);
+		pr_info("***charging enabled=%d,is_cool=%d,is_warm=%d\n",
+			qpnp_chg_charge_en_state(chip),chip->bat_is_cool,chip->bat_is_warm);
+
+		do {
+			int usbin = get_adc_val(chip,USBIN);
+			int vchg = get_adc_val(chip,VCHG_SNS);
+			int vbat = get_adc_val(chip,VBAT_SNS);
+			int vsys = get_adc_val(chip,VSYS);
+			int iusb_max = qpnp_chg_usb_iusbmax_get(chip);
+			pr_info("***usbin=%d vchg=%d vbat=%d vsys=%d iusb_max=%d\n",usbin,vchg,vbat,vsys,iusb_max);
+		} while(0);
+
+		old_temp = temp;
+		old_cap = cap;
+		old_status = status;
+		old_present = present;
+		old_usb_present = usb_present;
+	}
+
+	/*
+	  *report zero, but the uplayer is not shutdown in 60s,
+	  *kernel should power off directly.
+	  */
+	if (cap == 0) {
+		report_zero_cnt++;
+		pr_info("offcharging_flag=%d report_zero_cnt=%d\n",offcharging_flag,report_zero_cnt);
+		if ((offcharging_flag && (report_zero_cnt >= 60)) ||
+			(!offcharging_flag && (report_zero_cnt >= 3)) )
+			kernel_power_off();
+	}else
+		report_zero_cnt = 0;
+	
+	power_supply_changed(&chip->batt_psy);
+	if (heartbeat_ms >= 500) {
+		period = heartbeat_ms;
+	} else {
+		if (cap <= 20)
+			period = LOW_SOC_HEARTBEAT_MS;
+		else
+			period = HEARTBEAT_MS;
+	}
+	schedule_delayed_work(&chip->update_heartbeat_work,
+				      round_jiffies_relative(msecs_to_jiffies
+							     (period)));
+}
+
+#if defined(CONFIG_TOUCHSCREEN_FT5X06_ZTE)
+static void ts_usbdet_notify_worker(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct qpnp_chg_chip *chip = container_of(dwork,
+				struct qpnp_chg_chip, ts_usbdet_notify_work);
+	if (chip->usb_present) {
+		focaltech_ts_notifier_call_chain(1);
+	}else{
+		focaltech_ts_notifier_call_chain(0);
+	}	
+
+}
+#endif
+
 static int __devinit
 qpnp_charger_probe(struct spmi_device *spmi)
 {
@@ -4896,6 +5788,9 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			qpnp_chg_batfet_lcl_work);
 	INIT_WORK(&chip->insertion_ocv_work,
 			qpnp_chg_insertion_ocv_work);
+#if defined(CONFIG_TOUCHSCREEN_FT5X06_ZTE)	
+		INIT_DELAYED_WORK(&chip->ts_usbdet_notify_work, ts_usbdet_notify_worker);
+#endif	
 
 	/* Get all device tree properties */
 	rc = qpnp_charger_read_dt_props(chip);
@@ -4951,9 +5846,11 @@ qpnp_charger_probe(struct spmi_device *spmi)
 				}
 			}
 
+#if 0//zte
 			rc = qpnp_chg_load_battery_data(chip);
 			if (rc)
 				goto fail_chg_enable;
+#endif
 		}
 	}
 
@@ -5084,6 +5981,16 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			goto fail_chg_enable;
 		}
 	}
+	//zte:zhaolinquan
+	rc = qpnp_chg_masked_write(chip,
+		chip->chgr_base + 0x43,
+		0xFF,
+		0x4A, 1);
+	if (rc) {
+		pr_err("failed to write vdd_adj rc=%d\n", rc);
+		goto fail_chg_enable;
+	}
+
 	dev_set_drvdata(&spmi->dev, chip);
 	device_init_wakeup(&spmi->dev, 1);
 
@@ -5122,6 +6029,9 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			qpnp_usbin_health_check_work);
 	INIT_WORK(&chip->soc_check_work, qpnp_chg_soc_check_work);
 	INIT_DELAYED_WORK(&chip->aicl_check_work, qpnp_aicl_check_work);
+	INIT_DELAYED_WORK(&chip->update_heartbeat_work, update_heartbeat);//zte
+	INIT_DELAYED_WORK(&chip->soft_cc_monitor_work, soft_cc_monitor);//zte
+	soft_cc_reset();//ZTE:initialize soft_cc parameters
 
 	if (chip->dc_chgpth_base) {
 		chip->dc_psy.name = "qpnp-dc";
@@ -5182,6 +6092,13 @@ qpnp_charger_probe(struct spmi_device *spmi)
 		pr_err("failed to configure btc %d\n", rc);
 		goto unregister_dc_psy;
 	}
+	
+	//zte:init after EPROBE_DEFER
+	if (ext_ovp_present)
+		zte_ext_ovp_init();
+	
+	if (battery_switch_support)
+		zte_batt_switch_init();
 
 	qpnp_chg_charge_en(chip, !chip->charging_disabled);
 	qpnp_chg_force_run_on_batt(chip, chip->charging_disabled);
@@ -5201,6 +6118,8 @@ qpnp_charger_probe(struct spmi_device *spmi)
 		goto unregister_dc_psy;
 	}
 
+        wake_lock_init(&chip->charger_wake_lock, WAKE_LOCK_SUSPEND, "zte_chg_event");   //zte add
+        wake_lock_init(&chip->charger_fulled_lock, WAKE_LOCK_SUSPEND, "zte_chg_fulled");      //zte add
 	qpnp_chg_usb_chg_gone_irq_handler(chip->chg_gone.irq, chip);
 	qpnp_chg_usb_usbin_valid_irq_handler(chip->usbin_valid.irq, chip);
 	qpnp_chg_dc_dcin_valid_irq_handler(chip->dcin_valid.irq, chip);
@@ -5212,8 +6131,9 @@ qpnp_charger_probe(struct spmi_device *spmi)
 	if (qpnp_chg_is_usb_chg_plugged_in(chip))
 		power_supply_set_online(chip->usb_psy, 1);
 
+	//zte: modify the timer to 20s ,because the time to offcharge is too long...
 	schedule_delayed_work(&chip->aicl_check_work,
-		msecs_to_jiffies(EOC_CHECK_PERIOD_MS));
+		msecs_to_jiffies(EOC_CHECK_PERIOD_MS*2));
 	pr_info("success chg_dis = %d, bpd = %d, usb = %d, dc = %d b_health = %d batt_present = %d\n",
 			chip->charging_disabled,
 			chip->bpd_detection,
@@ -5221,6 +6141,10 @@ qpnp_charger_probe(struct spmi_device *spmi)
 			qpnp_chg_is_dc_chg_plugged_in(chip),
 			get_prop_batt_present(chip),
 			get_prop_batt_health(chip));
+	schedule_delayed_work(&chip->update_heartbeat_work,
+				  round_jiffies_relative(msecs_to_jiffies
+						(HEARTBEAT_MS)));
+	zte_chip	=	chip;	//zte jiangfeng add
 	return 0;
 
 unregister_dc_psy:
@@ -5294,7 +6218,12 @@ static int qpnp_chg_suspend(struct device *dev)
 		rc = qpnp_chg_masked_write(chip,
 			chip->bat_if_base + BAT_IF_VREF_BAT_THM_CTRL,
 			VREF_BATT_THERM_FORCE_ON,
+#if defined(CONFIG_BOARD_DRACONIS)
 			VREF_BAT_THM_ENABLED_FSM, 1);
+#else
+			VREF_BATT_THERM_FORCE_ON, 1);
+#endif
+
 		if (rc)
 			pr_debug("failed to set FSM VREF_BAT_THM rc=%d\n", rc);
 	}
@@ -5335,6 +6264,25 @@ qpnp_chg_exit(void)
 }
 module_exit(qpnp_chg_exit);
 
+//zte add
+static int set_enable_to_shutdown(const char *val, struct kernel_param *kp)
+{
+	int ret;
+
+	ret = param_set_int(val, kp);
+	if (ret) {
+		pr_err("error setting value %d\n", ret);
+		return ret;
+	}
+	if (zte_chip) {
+		pr_warn("set_enable_to_shutdown to %d\n", enable_to_shutdown);
+		return 0;
+	}
+	return -EINVAL;
+}
+module_param_call(enable_to_shutdown, set_enable_to_shutdown, param_get_uint,
+					&enable_to_shutdown, 0644);
+//zte add, end
 
 MODULE_DESCRIPTION("QPNP charger driver");
 MODULE_LICENSE("GPL v2");

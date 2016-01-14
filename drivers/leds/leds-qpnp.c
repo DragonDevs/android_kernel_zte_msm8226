@@ -27,6 +27,8 @@
 #include <linux/regulator/consumer.h>
 #include <linux/delay.h>
 
+#define LED_DRIVER_TAG	"ledlog_kernel  "
+
 #define WLED_MOD_EN_REG(base, n)	(base + 0x60 + n*0x10)
 #define WLED_IDAC_DLY_REG(base, n)	(WLED_MOD_EN_REG(base, n) + 0x01)
 #define WLED_FULL_SCALE_REG(base, n)	(WLED_IDAC_DLY_REG(base, n) + 0x01)
@@ -176,6 +178,7 @@
 #define RGB_LED_ENABLE_MASK		0xE0
 #define RGB_LED_SRC_MASK		0x03
 #define QPNP_LED_PWM_FLAGS	(PM_PWM_LUT_LOOP | PM_PWM_LUT_RAMP_UP)
+#define QPNP_ZTE_PWM_FLAGS	(PM_PWM_LUT_LOOP | PM_PWM_LUT_PAUSE_LO_EN|PM_PWM_LUT_PAUSE_HI_EN)	//zte-ccb-20130903
 #define QPNP_LUT_RAMP_STEP_DEFAULT	255
 #define	PWM_LUT_MAX_SIZE		63
 #define	PWM_GPLED_LUT_MAX_SIZE		31
@@ -1303,6 +1306,8 @@ static int qpnp_rgb_set(struct qpnp_led_data *led)
 	int duty_us;
 	int rc;
 
+	printk(LED_DRIVER_TAG "qpnp_rgb_set() brightness=%d; \t %s\n",led->cdev.brightness,led->cdev.name);	//ZTE LOG
+
 	if (led->cdev.brightness) {
 		if (!led->rgb_cfg->pwm_cfg->blinking)
 			led->rgb_cfg->pwm_cfg->mode =
@@ -1352,7 +1357,8 @@ static int qpnp_rgb_set(struct qpnp_led_data *led)
 
 	return 0;
 }
-
+static void __qpnp_led_work(struct qpnp_led_data *led,
+                                enum led_brightness value);
 static void qpnp_led_set(struct led_classdev *led_cdev,
 				enum led_brightness value)
 {
@@ -1366,9 +1372,16 @@ static void qpnp_led_set(struct led_classdev *led_cdev,
 
 	if (value > led->cdev.max_brightness)
 		value = led->cdev.max_brightness;
-
+	
 	led->cdev.brightness = value;
-	schedule_work(&led->work);
+	if ((!strcmp(led->cdev.name,"green")) || (!strcmp(led->cdev.name,"red"))) {
+		//pr_info("DBG call direct: name=%s\n",led->cdev.name);
+		__qpnp_led_work(led, led->cdev.brightness);
+	}
+	else {
+		//pr_info("DBG call scheduled: name=%s\n",led->cdev.name);
+		schedule_work(&led->work);
+	}
 }
 
 static void __qpnp_led_work(struct qpnp_led_data *led,
@@ -2146,6 +2159,7 @@ static void led_blink(struct qpnp_led_data *led,
 			if (led->id == QPNP_ID_LED_MPP)
 				led->mpp_cfg->pwm_mode = pwm_cfg->default_mode;
 		}
+		led->cdev.blink_value = pwm_cfg->blinking; //zte add for blink_show()		
 		pwm_free(pwm_cfg->pwm_dev);
 		qpnp_pwm_init(pwm_cfg, led->spmi_dev, led->cdev.name);
 		qpnp_led_set(&led->cdev, led->cdev.brightness);
@@ -2170,6 +2184,7 @@ static ssize_t blink_store(struct device *dev,
 	switch (led->id) {
 	case QPNP_ID_LED_MPP:
 		led_blink(led, led->mpp_cfg->pwm_cfg);
+		printk(LED_DRIVER_TAG "blink_store()  %s  brightness=%d    blink=%d \n",led->cdev.name,led->cdev.brightness,led->cdev.blink_value);//zte add
 		break;
 	case QPNP_ID_RGB_RED:
 	case QPNP_ID_RGB_GREEN:
@@ -2183,6 +2198,14 @@ static ssize_t blink_store(struct device *dev,
 	return count;
 }
 
+static ssize_t blink_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct qpnp_led_data *led;	
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	led = container_of(led_cdev, struct qpnp_led_data, cdev);
+	return sprintf(buf, "blink = %d\n", led->cdev.blink_value);
+}
+
 static DEVICE_ATTR(led_mode, 0664, NULL, led_mode_store);
 static DEVICE_ATTR(strobe, 0664, NULL, led_strobe_type_store);
 static DEVICE_ATTR(pwm_us, 0664, NULL, pwm_us_store);
@@ -2192,7 +2215,7 @@ static DEVICE_ATTR(start_idx, 0664, NULL, start_idx_store);
 static DEVICE_ATTR(ramp_step_ms, 0664, NULL, ramp_step_ms_store);
 static DEVICE_ATTR(lut_flags, 0664, NULL, lut_flags_store);
 static DEVICE_ATTR(duty_pcts, 0664, NULL, duty_pcts_store);
-static DEVICE_ATTR(blink, 0664, NULL, blink_store);
+static DEVICE_ATTR(blink, 0664, blink_show, blink_store);
 
 static struct attribute *led_attrs[] = {
 	&dev_attr_led_mode.attr,
@@ -2924,7 +2947,7 @@ static int __devinit qpnp_get_config_pwm(struct pwm_config_data *pwm_cfg,
 		else if (rc != -EINVAL)
 			goto bad_lpg_params;
 
-		pwm_cfg->lut_params.flags = QPNP_LED_PWM_FLAGS;
+		pwm_cfg->lut_params.flags = QPNP_ZTE_PWM_FLAGS;//zte modify
 		rc = of_property_read_u32(node, "qcom,lut-flags", &val);
 		if (!rc)
 			pwm_cfg->lut_params.flags = (u8) val;
@@ -2933,6 +2956,14 @@ static int __devinit qpnp_get_config_pwm(struct pwm_config_data *pwm_cfg,
 
 		pwm_cfg->lut_params.idx_len =
 			pwm_cfg->duty_cycles->num_duty_pcts;
+		pr_info("PWM Config:\n");
+		pr_info("\tpwm-us=%d\n",pwm_cfg->pwm_period_us);
+		pr_info("\tstart-idx=%d\n",pwm_cfg->lut_params.start_idx);
+		pr_info("\tpause-lo=%d\n",pwm_cfg->lut_params.lut_pause_lo);
+		pr_info("\tpause-hi=%d\n",pwm_cfg->lut_params.lut_pause_hi);
+		pr_info("\tramp-step-ms=%d\n",pwm_cfg->lut_params.ramp_step_ms);
+		pr_info("\tlut-flags=0x%x\n",pwm_cfg->lut_params.flags);
+		
 	}
 	return 0;
 
@@ -3366,8 +3397,10 @@ static int __devinit qpnp_leds_probe(struct spmi_device *spmi)
 			__qpnp_led_work(led, led->cdev.brightness);
 			if (led->turn_off_delay_ms > 0)
 				qpnp_led_turn_off(led);
-		} else
+		} else{
 			led->cdev.brightness = LED_OFF;
+			__qpnp_led_work(led, led->cdev.brightness);
+		}
 
 		parsed_leds++;
 	}

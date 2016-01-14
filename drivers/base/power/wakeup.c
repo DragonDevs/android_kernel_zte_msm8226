@@ -17,7 +17,9 @@
 #include <trace/events/power.h>
 
 #include "power.h"
-
+#ifdef CONFIG_ZTE_BOOT_MODE //zte_pm_lhx
+#include <mach/socinfo.h>
+#endif
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
  * if wakeup events are registered during or immediately before the transition.
@@ -42,6 +44,11 @@ static void split_counters(unsigned int *cnt, unsigned int *inpr)
 	*inpr = comb & MAX_IN_PROGRESS;
 }
 
+#ifndef DUMP_WAKELOCK //lhx_pm_20130821 enable dump wakelock
+#define DUMP_WAKELOCK
+#include <linux/delay.h>
+static bool dump_wakesouce_enable = false;
+#endif
 /* A preserved old value of the events counter. */
 static unsigned int saved_count;
 
@@ -673,6 +680,36 @@ bool pm_wakeup_pending(void)
 	spin_unlock_irqrestore(&events_lock, flags);
 	return ret;
 }
+#ifdef DUMP_WAKELOCK
+static int dump_period = 60; // period is 2*dump_period seconds,In FTM mode,we should set it as 5 to make the period as 10s
+void dump_wakeup_source_zte(void)
+{
+	struct wakeup_source *ws;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
+		{
+		if(ws->active)
+			{
+			pr_info("zte_dump wakesource %s is active \n",ws->name);
+			}
+		}
+	rcu_read_unlock();
+
+}
+
+static void dump_wakelock_handle(struct work_struct *work)
+{
+	while(1) {
+		if(dump_wakesouce_enable)
+			dump_wakeup_source_zte();
+		msleep(2*dump_period*1000);
+		}
+}
+
+static struct workqueue_struct *dump_wakelock_wq;
+static DECLARE_WORK(dump_wakelock_work, dump_wakelock_handle);
+#endif
 
 /**
  * pm_get_wakeup_count - Read the number of registered wakeup events.
@@ -697,6 +734,10 @@ bool pm_get_wakeup_count(unsigned int *count, bool block)
 			prepare_to_wait(&wakeup_count_wait_queue, &wait,
 					TASK_INTERRUPTIBLE);
 			split_counters(&cnt, &inpr);
+			#ifdef DUMP_WAKELOCK
+			pr_info("zte_pm %s for(;;)cnt= %d and wakesource count inpr= %d \n",__func__,cnt,inpr);
+			dump_wakeup_source_zte();			
+			#endif
 			if (inpr == 0 || signal_pending(current))
 				break;
 
@@ -746,6 +787,16 @@ void pm_wakep_autosleep_enabled(bool set)
 	ktime_t now = ktime_get();
 
 	rcu_read_lock();
+	#ifdef DUMP_WAKELOCK
+	if(set)
+	{
+		dump_wakesouce_enable = true;
+	}
+	else
+	{
+		dump_wakesouce_enable = false;
+	}
+	#endif
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
 		spin_lock_irq(&ws->lock);
 		if (ws->autosleep_enabled != set) {
@@ -802,6 +853,15 @@ static int print_wakeup_source_stats(struct seq_file *m,
 		active_time = ktime_set(0, 0);
 	}
 
+	#ifdef DUMP_WAKELOCK
+	ret = seq_printf(m, "%-12s\t%d\t\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
+			"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
+			ws->name, ws->active,active_count, ws->event_count,
+			ws->wakeup_count, ws->expire_count,
+			ktime_to_ms(active_time), ktime_to_ms(total_time),
+			ktime_to_ms(max_time), ktime_to_ms(ws->last_time),
+			ktime_to_ms(prevent_sleep_time));
+	#else
 	ret = seq_printf(m, "%-12s\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
 			"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
 			ws->name, active_count, ws->event_count,
@@ -809,6 +869,7 @@ static int print_wakeup_source_stats(struct seq_file *m,
 			ktime_to_ms(active_time), ktime_to_ms(total_time),
 			ktime_to_ms(max_time), ktime_to_ms(ws->last_time),
 			ktime_to_ms(prevent_sleep_time));
+	#endif
 
 	spin_unlock_irqrestore(&ws->lock, flags);
 
@@ -823,9 +884,16 @@ static int wakeup_sources_stats_show(struct seq_file *m, void *unused)
 {
 	struct wakeup_source *ws;
 
+#ifdef DUMP_WAKELOCK
+	seq_puts(m, "name\t\tactive\t\tactive_count\tevent_count\twakeup_count\t"
+		"expire_count\tactive_since\ttotal_time\tmax_time\t"
+		"last_change\tprevent_suspend_time\n");
+#else
 	seq_puts(m, "name\t\tactive_count\tevent_count\twakeup_count\t"
 		"expire_count\tactive_since\ttotal_time\tmax_time\t"
 		"last_change\tprevent_suspend_time\n");
+
+#endif
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
@@ -850,6 +918,30 @@ static const struct file_operations wakeup_sources_stats_fops = {
 
 static int __init wakeup_sources_debugfs_init(void)
 {
+#ifdef DUMP_WAKELOCK
+
+	#ifdef CONFIG_ZTE_BOOT_MODE
+	/*
+	 * Support for FTM & RECOVERY mode by ZTE_PM_LHX_20131202
+	 *
+	 * 0: Normal mode
+	 * 1: FTM mode
+	 */
+	    if (socinfo_get_ftm_flag() == 1)
+	    {
+	        dump_period = 5;
+			pr_info("ZTE_PM set dump wakesource period to 10s  in FTM mode");
+	    }
+	#endif		
+		dump_wakelock_wq = create_singlethread_workqueue("wakelock_dump");
+		if (dump_wakelock_wq == NULL) {
+			pr_info("zte_pm fail to create dump_wakelock_wq \n");
+		}
+		else
+		{
+			queue_work(dump_wakelock_wq, &dump_wakelock_work);
+		}
+#endif
 	wakeup_sources_stats_dentry = debugfs_create_file("wakeup_sources",
 			S_IRUGO, NULL, NULL, &wakeup_sources_stats_fops);
 	return 0;

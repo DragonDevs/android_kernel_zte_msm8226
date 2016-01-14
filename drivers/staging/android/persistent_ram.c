@@ -339,6 +339,26 @@ void persistent_ram_free_old(struct persistent_ram_zone *prz)
 static int persistent_ram_buffer_map(phys_addr_t start, phys_addr_t size,
 		struct persistent_ram_zone *prz)
 {
+/*
+ * RAM console support by ZTE_BOOT_JIA_20130121 jia.jia
+ */
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+	if (offset_in_page(start) != 0) {
+		pr_warning("%s: phys address 0x%x not align with page 0x%lx!\n", __func__, start, PAGE_SIZE);
+	}
+
+	prz->buffer = ioremap(start, size);
+	if (prz->buffer == NULL) {
+		pr_err("%s: failed to map memory!\n", __func__);
+		return -ENOMEM;
+	}
+
+	prz->buffer_size = size - sizeof(struct persistent_ram_buffer);
+
+	pr_info("ram_console: got buffer's virt address at 0x%p, size 0x%x\n", prz->buffer, prz->buffer_size);
+
+	return 0;
+#else
 	struct page **pages;
 	phys_addr_t page_start;
 	unsigned int page_count;
@@ -372,6 +392,7 @@ static int persistent_ram_buffer_map(phys_addr_t start, phys_addr_t size,
 	prz->buffer_size = size - sizeof(struct persistent_ram_buffer);
 
 	return 0;
+#endif /* CONFIG_ZTE_RAM_CONSOLE */
 }
 
 static int __devinit persistent_ram_buffer_init(const char *name,
@@ -405,6 +426,10 @@ struct persistent_ram_zone *__persistent_ram_init(struct device *dev, bool ecc)
 	struct persistent_ram_zone *prz;
 	int ret = -ENOMEM;
 
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+		bool	haveOldLog	=	false;
+#endif
+
 	prz = kzalloc(sizeof(struct persistent_ram_zone), GFP_KERNEL);
 	if (!prz) {
 		pr_err("persistent_ram: failed to allocate persistent ram zone\n");
@@ -435,15 +460,29 @@ struct persistent_ram_zone *__persistent_ram_init(struct device *dev, bool ecc)
 				" size %zu, start %zu\n",
 			       buffer_size(prz), buffer_start(prz));
 			persistent_ram_save_old(prz);
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+			haveOldLog	=	true;
+#endif
 		}
 	} else {
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+		if(prz->buffer->sig != 0xFFFFFFFF)
+			persistent_ram_save_old(prz);
+#endif
 		pr_info("persistent_ram: no valid data in buffer"
 			" (sig = 0x%08x)\n", prz->buffer->sig);
 	}
 
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+	if(!haveOldLog)
+	{
+#endif
 	prz->buffer->sig = PERSISTENT_RAM_SIG;
 	atomic_set(&prz->buffer->start, 0);
 	atomic_set(&prz->buffer->size, 0);
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+	}
+#endif
 
 	return prz;
 err:
@@ -457,7 +496,16 @@ persistent_ram_init_ringbuffer(struct device *dev, bool ecc)
 	return __persistent_ram_init(dev, ecc);
 }
 
+/*
+ * To fix compiling warning of 'Section mismatch in reference from the function'
+ * with the macro of 'CONFIG_DEBUG_SECTION_MISMATCH=y'
+ * by ZTE_BOOT_JIA_20130121 jia.jia
+ */
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+int __devinit persistent_ram_early_init(struct persistent_ram *ram)
+#else
 int __init persistent_ram_early_init(struct persistent_ram *ram)
+#endif /* CONFIG_ZTE_RAM_CONSOLE */
 {
 	int ret;
 

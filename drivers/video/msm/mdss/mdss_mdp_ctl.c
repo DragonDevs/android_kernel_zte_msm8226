@@ -422,7 +422,13 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 
 static inline int mdss_mdp_perf_is_overlap(u32 y00, u32 y01, u32 y10, u32 y11)
 {
+	
+#ifdef CONFIG_BOARD_DRACONIS	//T57
+	return (y10 < y00 && y11 >= y01) || (y10 >= y00 && y10 <= y01);
+#else
 	return (y10 < y00 && y11 >= y01) || (y10 >= y00 && y10 < y01);
+#endif
+	
 }
 
 static inline int cmpu32(const void *a, const void *b)
@@ -508,7 +514,12 @@ static void mdss_mdp_perf_calc_mixer(struct mdss_mdp_mixer *mixer,
 		pr_debug("v_region[%d]%d\n", i, v_region[i]);
 		if (v_region[i] == v_region[i-1])
 			continue;
+		
+	#ifdef CONFIG_BOARD_DRACONIS//T57
+		y0 = (v_region[i-1]) ? v_region[i-1] + 1 : 0;
+	#else
 		y0 = v_region[i-1];
+	#endif
 		y1 = v_region[i];
 		for (j = 0; j < num_pipes; j++) {
 			if (!bw_overlap[j])

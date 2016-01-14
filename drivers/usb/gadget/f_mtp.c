@@ -123,9 +123,9 @@ static struct usb_interface_descriptor mtp_interface_desc = {
 	.bDescriptorType        = USB_DT_INTERFACE,
 	.bInterfaceNumber       = 0,
 	.bNumEndpoints          = 3,
-	.bInterfaceClass        = USB_CLASS_VENDOR_SPEC,
-	.bInterfaceSubClass     = USB_SUBCLASS_VENDOR_SPEC,
-	.bInterfaceProtocol     = 0,
+	.bInterfaceClass        = USB_CLASS_STILL_IMAGE, //USB_CLASS_VENDOR_SPEC,
+	.bInterfaceSubClass     = 1, //USB_SUBCLASS_VENDOR_SPEC,
+	.bInterfaceProtocol     = 1, //0,
 };
 
 static struct usb_interface_descriptor ptp_interface_desc = {
@@ -562,6 +562,15 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	int ret = 0;
 
 	DBG(cdev, "mtp_read(%d)\n", count);
+
+	if (!dev) {
+		printk(KERN_ERR"usb,mtp_read failed! dev == NULL! \n");
+		return -EINVAL;
+	}
+	if (!dev->ep_out) {
+		printk(KERN_ERR"usb,mtp_read failed! dev->ep_out == NULL! \n");
+		return -EINVAL;
+	}
 
 	len = ALIGN(count, dev->ep_out->maxpacket);
 

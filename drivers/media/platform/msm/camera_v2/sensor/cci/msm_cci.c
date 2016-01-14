@@ -618,7 +618,12 @@ static int32_t msm_cci_i2c_write(struct v4l2_subdev *sd,
 		msm_cci_flush_queue(cci_dev, master);
 		goto ERROR;
 	} else {
+	/*fix P892U12 front camera open error by caidezun 20140820*/
+	#if 0
 		rc = cci_dev->cci_master_info[master].status;
+    #else
+       rc = 0;
+    #endif
 	}
 	CDBG("%s:%d X wait_for_completion_interruptible\n", __func__,
 		__LINE__);

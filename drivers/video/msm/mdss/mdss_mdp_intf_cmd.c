@@ -15,6 +15,7 @@
 
 #include "mdss_mdp.h"
 #include "mdss_panel.h"
+#include <mach/socinfo.h>
 #include "mdss_mdp_trace.h"
 
 #define VSYNC_EXPIRE_TICK 4
@@ -125,7 +126,20 @@ static int mdss_mdp_cmd_tearcheck_cfg(struct mdss_mdp_mixer *mixer,
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_VSYNC, cfg);
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_HEIGHT,
 				0xfff0); /* set to verh height */
-
+#ifdef CONFIG_BOARD_ERIDANI
+	#ifdef ZTE_BOOT_MODE
+	/*
+	 * 0: Normal mode
+	 * 1: FTM mode
+	 */
+	    if (socinfo_get_ftm_flag() == 1)
+	    {
+			mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_SYNC_CONFIG_HEIGHT,
+				ctx->height + 60); /* set to verh height */
+			printk("LCD P892U12 CMD panel, Disable TE in FTM mode");
+	    }
+	#endif
+#endif
 	mdss_mdp_pingpong_write(mixer, MDSS_MDP_REG_PP_VSYNC_INIT_VAL,
 						ctx->height);
 
@@ -399,13 +413,13 @@ static void __mdss_mdp_cmd_ulps_work(struct work_struct *work)
 		return;
 	}
 
-	mutex_lock(&ctx->clk_mtx);
+	//mutex_lock(&ctx->clk_mtx);
 	if (ctx->clk_enabled) {
-		mutex_unlock(&ctx->clk_mtx);
+		//mutex_unlock(&ctx->clk_mtx);
 		pr_warn("Cannot enter ulps mode if DSI clocks are on\n");
 		return;
 	}
-	mutex_unlock(&ctx->clk_mtx);
+	//mutex_unlock(&ctx->clk_mtx);
 
 	if (!ctx->panel_on) {
 		pr_err("Panel is off. skipping ULPS configuration\n");

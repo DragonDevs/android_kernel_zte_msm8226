@@ -19,15 +19,78 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/leds.h>
+
+#include <linux/of_gpio.h>
+#include <linux/proc_fs.h>
+#include <linux/pwm.h>
+
 #include <linux/qpnp/pwm.h>
+
 #include <linux/err.h>
 
 #include "mdss_dsi.h"
-
+#include "mdss_panel.h"
 #define DT_CMD_HDR 6
-
+static struct proc_dir_entry * d_entry;
+static char  module_name[50]={"0"};
+u32 LcdPanleID=(u32)LCD_PANEL_NOPANEL;
+#define dev_log "LCD"
+#define   LCD_ID_STRING		"lcd_id="	
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
+static int mdss_dsi_panel_lcd_read_proc(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int len = 0;
+	
+	len = sprintf(page, "%s\n", module_name);
+	
+	return len;
+}
+void  mdss_dsi_panel_lcd_proc(struct device_node *node)
+{	
+	const char * panel_name ;	
+	d_entry = create_proc_entry("msm_lcd", 0, NULL);
+	if(d_entry) {	
+		d_entry->read_proc = mdss_dsi_panel_lcd_read_proc;
+		d_entry->write_proc = NULL;
+		d_entry->data = NULL;
+	}
+	
+	panel_name = of_get_property(node,
+		"qcom,mdss-dsi-panel-name", NULL);
+	if (!panel_name){
+		pr_info("LCD %s:%d, panel name not found!\n",
+						__func__, __LINE__);
+		strcpy(module_name,"0");
+	}else{
+		pr_info("LCD%s: Panel Name = %s\n", __func__, panel_name);
+		strcpy(module_name,panel_name);
+	}
+}
+static int atoi(const char *name)
+{
+	int val = 0;
+
+	for (;; name++) {
+		switch (*name) {
+		case '0' ... '9':
+			val = 10*val+(*name-'0');
+			break;
+		default:
+			return val;
+		}
+	}
+}
+int __init get_lcd_id(char *id)
+{
+     //char panel = *id;
+	printk("\n  LCD ID string %s",id);
+	LcdPanleID = atoi(id);
+	printk("\n  LcdPanleID = %d",LcdPanleID);
+	return 1;
+}
+
+__setup(LCD_ID_STRING, get_lcd_id);
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	ctrl->pwm_bl = pwm_request(ctrl->pwm_lpg_chan, "lcd-bklt");
@@ -80,7 +143,138 @@ static void mdss_dsi_panel_bklt_pwm(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 		pr_err("%s: pwm_enable() failed err=%d\n", __func__, ret);
 	ctrl->pwm_enabled = 1;
 }
+void mdss_dsi_panel_bl_cmd_gpio_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	int ret;
 
+	if (!gpio_is_valid(ctrl->bl_cmd_gpio)) {
+		pr_err("%s: bl_cmd_gpio=%d Invalid\n", __func__,
+				ctrl->pwm_pmic_gpio);
+		ctrl->bl_cmd_gpio = -1;
+		return;
+	}
+
+	ret = gpio_request(ctrl->bl_cmd_gpio, "bl_cmd_gpio");
+	if (ret) {
+		pr_err("%s: bl_cmd_gpio=%d request failed\n", __func__,
+				ctrl->bl_cmd_gpio);
+		ctrl->bl_cmd_gpio = -1;
+		return;
+	}
+}
+static bool onewiremode = true;
+void myudelay(unsigned int usec)
+{
+	udelay(usec);
+}
+static void select_1wire_mode(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+	myudelay(120);
+	gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+	myudelay(280);				////ZTE_LCD_LUYA_20100226_001
+	gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+	myudelay(650);				////ZTE_LCD_LUYA_20100226_001
+	
+}
+
+
+static void send_bkl_address(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	unsigned int i,j;
+	i = 0x72;
+	gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+	myudelay(10);
+	for(j = 0; j < 8; j++)
+	{
+		if(i & 0x80)
+		{
+			gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+			myudelay(10);
+			gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+			myudelay(180);
+		}
+		else
+		{
+			gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+			myudelay(180);
+			gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+			myudelay(10);
+		}
+		i <<= 1;
+	}
+	gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+	myudelay(10);
+	gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+
+}
+
+static void send_bkl_data(struct mdss_dsi_ctrl_pdata *ctrl,int level)
+{
+	unsigned int i,j;
+	i = level & 0x1F;
+	gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+	myudelay(10);
+	for(j = 0; j < 8; j++)
+	{
+		if(i & 0x80)
+		{
+			gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+			myudelay(10);
+			gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+			myudelay(180);
+		}
+		else
+		{
+			gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+			myudelay(180);
+			gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+			myudelay(10);
+		}
+		i <<= 1;
+	}
+	gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+	myudelay(10);
+	gpio_direction_output(ctrl->bl_cmd_gpio, 1);
+
+}
+
+static void mdss_dsi_panel_bklt_gpio(struct mdss_dsi_ctrl_pdata *ctrl, int level)
+{
+
+	/*level range is 0--31*/
+
+  	unsigned long flags;
+
+	//level &= 0x1f;
+	if (level > 31)
+		level = 31;
+
+	printk("LCD backlight level=%d\n",level);
+	
+    	local_irq_save(flags);
+		
+   	if(level==0){
+    		gpio_direction_output(ctrl->bl_cmd_gpio, 0);
+		mdelay(3);
+		onewiremode = false;
+			
+    	}else {
+		if(!onewiremode)	
+		{
+			printk("[LY] before select_1wire_mode\n");
+	//#ifdef CONFIG_BOARD_GRUIS//P892A12
+			//msleep(50);
+	//#endif
+			select_1wire_mode(ctrl);
+			onewiremode = true;
+		}
+		send_bkl_address(ctrl);
+		send_bkl_data(ctrl,level);
+	}	
+    	local_irq_restore(flags);
+	
+}
 static char dcs_cmd[2] = {0x54, 0x00}; /* DTYPE_DCS_READ */
 static struct dsi_cmd_desc dcs_read_cmd = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
@@ -225,7 +419,8 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_err("gpio request failed\n");
 			return rc;
 		}
-		if (!pinfo->panel_power_on) {
+		printk("LCD pinfo->mipi->lp11_init=%d\n",pinfo->mipi.lp11_init);
+		if ((!pinfo->panel_power_on) ||(pinfo->mipi.lp11_init)){
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 
@@ -317,6 +512,47 @@ static int mdss_dsi_panel_partial_update(struct mdss_panel_data *pdata)
 	return rc;
 }
 
+void mdss_dsi_panel_5v_power(struct mdss_panel_data *pdata, int enable)
+{
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+
+	if (pdata == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return;
+	}
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+
+	if (!gpio_is_valid(ctrl_pdata->lcd_5v_vsp_en_gpio)) {
+		pr_debug("%s:%d, lcd_5v_vsp_en_gpio not configured\n",
+			   __func__, __LINE__);
+		return ;
+	}
+	if (!gpio_is_valid(ctrl_pdata->lcd_5v_vsn_en_gpio)) {
+		pr_debug("%s:%d, lcd_5v_vsn_en_gpio not configured\n",
+			   __func__, __LINE__);
+		return ;
+	}
+	printk("LCD 5v_power GPIO(vsp):%d , GPIO(vsn):%d Enable:%d\n",ctrl_pdata->lcd_5v_vsp_en_gpio ,ctrl_pdata->lcd_5v_vsn_en_gpio, enable);
+
+	if (enable) {
+		if (gpio_is_valid(ctrl_pdata->lcd_5v_vsp_en_gpio)){
+			gpio_set_value((ctrl_pdata->lcd_5v_vsp_en_gpio), 1);			
+		}
+		if (gpio_is_valid(ctrl_pdata->lcd_5v_vsn_en_gpio)){
+			gpio_set_value((ctrl_pdata->lcd_5v_vsn_en_gpio), 1);			
+		}
+		msleep(5);
+		
+	} else {
+		if (gpio_is_valid(ctrl_pdata->lcd_5v_vsp_en_gpio))
+			gpio_set_value((ctrl_pdata->lcd_5v_vsp_en_gpio), 0);
+		if (gpio_is_valid(ctrl_pdata->lcd_5v_vsn_en_gpio))
+			gpio_set_value((ctrl_pdata->lcd_5v_vsn_en_gpio), 0);
+	}
+}
+
 static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 							u32 bl_level)
 {
@@ -359,6 +595,9 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 			mdss_dsi_panel_bklt_dcs(sctrl, bl_level);
 		}
 		break;
+	case BL_CMD_GPIO:
+		mdss_dsi_panel_bklt_gpio(ctrl_pdata, bl_level);
+		break;
 	default:
 		pr_err("%s: Unknown bl_ctrl configuration\n",
 			__func__);
@@ -379,13 +618,16 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 	mipi  = &pdata->panel_info.mipi;
-
+	
+	//mdss_dsi_panel_reset(pdata, 1);//pan add 
+	
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
 
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
 
 	pr_debug("%s:-\n", __func__);
+	printk("LCD mdss_dsi_panel_on\n");
 	return 0;
 }
 
@@ -410,6 +652,7 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
 	pr_debug("%s:-\n", __func__);
+	printk("LCD mdss_dsi_panel_off\n");
 	return 0;
 }
 
@@ -539,7 +782,6 @@ exit_free:
 	kfree(buf);
 	return -ENOMEM;
 }
-
 
 static int mdss_panel_dt_get_dst_fmt(u32 bpp, char mipi_mode, u32 pixel_packing,
 				char *dst_format)
@@ -692,6 +934,9 @@ static int mdss_dsi_parse_reset_seq(struct device_node *np,
 	}
 	return 0;
 }
+#if 0//def CONFIG_BOARD_DRACONIS
+extern uint8_t read_zte_hw_ver_byte(void);
+#endif
 
 static int mdss_dsi_parse_panel_features(struct device_node *np,
 	struct mdss_dsi_ctrl_pdata *ctrl)
@@ -861,6 +1106,20 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		} else if (!strncmp(data, "bl_ctrl_dcs", 11)) {
 			ctrl_pdata->bklt_ctrl = BL_DCS_CMD;
 		}
+		else if(!strncmp(data, "bl_ctrl_gpio", 12)){
+			ctrl_pdata->bklt_ctrl = BL_CMD_GPIO;
+			tmp = of_get_named_gpio(np,
+				"qcom,mdss-dsi-bl-cmd-gpio", 0);
+			pinfo->bl_cmd_gpio = tmp;
+
+			//#ifdef CONFIG_BOARD_DRACONIS
+				//if (read_zte_hw_ver_byte()==1)//new hardware vertion
+				//{
+					pinfo->bl_cmd_gpio = 33;	
+					printk("LCD change BL gpio to gpio33 \n ");
+				//}
+			//#endif
+		}
 	}
 	rc = of_property_read_u32(np, "qcom,mdss-brightness-max-level", &tmp);
 	pinfo->brightness_max = (!rc ? tmp : MDSS_MAX_BL_BRIGHTNESS);
@@ -1026,6 +1285,10 @@ int mdss_dsi_panel_init(struct device_node *node,
 		return -ENODEV;
 	}
 
+	//if(rc){
+	//	pr_err("[lcd]%s: check : this panel configure is't current panel,return\n",__func__);
+		//return 	-ENODEV;
+	//}
 	pinfo = &ctrl_pdata->panel_data.panel_info;
 
 	pr_debug("%s:%d\n", __func__, __LINE__);
@@ -1050,6 +1313,6 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->on = mdss_dsi_panel_on;
 	ctrl_pdata->off = mdss_dsi_panel_off;
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
-
+	mdss_dsi_panel_lcd_proc(node);
 	return 0;
 }

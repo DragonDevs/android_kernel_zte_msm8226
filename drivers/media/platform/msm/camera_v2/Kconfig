@@ -110,6 +110,12 @@ config S5K3L1YX
 		snapshot config = 4000 * 3000 at 20 fps,
 		hfr video at 60, 90 and 120 fps.
 
+config IMX219
+	bool "Sensor IMX219 (BAYER 8M)"
+	depends on MSMB_CAMERA
+	---help---
+		Sony 8 MP Bayer Sensor with auto focus.Video HDR support.
+		
 config IMX135
 	bool "Sensor IMX135 (BAYER 12M)"
 	depends on MSMB_CAMERA
@@ -249,3 +255,48 @@ config MSM_GEMINI
 	depends on MSMB_CAMERA && (ARCH_MSM7X30 || ARCH_MSM8X60 || ARCH_MSM8960)
 	---help---
 	  Enables support for the Gemini JPEG encoder engine for 8x60.
+
+config AR0542
+	bool "Aptina AR0542 (BAYER 5MP)"
+	depends on MSMB_CAMERA
+	---help---
+		Aptina 5 MP Bayer Sensor with auto focus.uses
+		2 mipi lanes, preview config = 1296*972 ,
+		snapshot config = 2592 * 1944 .
+		
+config OV9760
+	bool "OV OV9760 (BAYER 1MP)"
+	depends on MSMB_CAMERA
+	---help---
+		OmniVision 1.6 MP Bayer FF Sensor.uses
+		1 mipi lanes, preview config = 1472*1104 ,
+		snapshot config = 1472*1104 .
+
+config OV2680
+	bool "OV OV2680 (BAYER 2MP)"
+	depends on MSMB_CAMERA
+	---help---
+		OmniVision 2.0 MP Bayer FF Sensor.uses
+		1 mipi lanes, preview config = 800*600 ,
+		snapshot config = 1600*1200 .
+		
+config OV8835
+	bool "OV OV8835 (BAYER 8MP)"
+	depends on MSMB_CAMERA
+	---help---
+		OmniVision 8 MP Bayer Sensor with auto focus.uses
+		4 mipi lanes, preview config = 1632*1224 30 fps,
+		snapshot config = 3264 * 2448 at 24 fps.
+		2 lanes max fps is 18, 4 lanes max fps is 24.
+
+config MSM_CAMERA_EMODE
+	bool "Qualcomm MSM camera sensor engineering mode support"
+	depends on MSMB_CAMERA
+	---help---
+	  Support for engineering mode
+	  
+config ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
+	bool "ZTE camera sensor standby mode power control"
+	depends on MSMB_CAMERA
+	---help---
+	   standby mode

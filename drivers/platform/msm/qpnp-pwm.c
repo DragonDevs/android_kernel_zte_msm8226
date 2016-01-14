@@ -26,6 +26,7 @@
 #include <linux/of_device.h>
 #include <linux/radix-tree.h>
 #include <linux/qpnp/pwm.h>
+#include <linux/delay.h>    //20140619 qualcomm case01590680,zte
 
 #define QPNP_LPG_DRIVER_NAME	"qcom,qpnp-pwm"
 #define QPNP_LPG_CHANNEL_BASE	"qpnp-lpg-channel-base"
@@ -674,6 +675,7 @@ static int qpnp_lpg_save_pwm_value(struct pwm_device *pwm)
 			&pwm->chip->qpnp_lpg_registers[QPNP_PWM_VALUE_LSB],
 			SPMI_LPG_REG_ADDR(lpg_config->base_addr,
 			QPNP_PWM_VALUE_LSB), 1, chip);
+
 	if (rc)
 		return rc;
 
@@ -1038,8 +1040,15 @@ static int qpnp_lpg_configure_lut_state(struct pwm_device *pwm,
 	if (rc)
 		return rc;
 
-	return qpnp_lpg_save_and_write(value1, mask1, reg1,
+	//20140619 qualcomm case01590680 -begin
+	/*return qpnp_lpg_save_and_write(value1, mask1, reg1,
+					addr1, 1, chip);*/
+	mdelay(5);
+	if(state == QPNP_LUT_ENABLE)
+		rc= qpnp_lpg_save_and_write(value1, mask1, reg1,
 					addr1, 1, chip);
+	return rc;
+	//20140619 qualcomm case01590680 -end
 }
 
 static inline int qpnp_enable_pwm_mode(struct qpnp_pwm_config *pwm_conf)

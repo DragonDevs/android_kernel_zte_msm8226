@@ -22,6 +22,45 @@
 
 #include <asm/cputype.h>
 #include <asm/mach-types.h>
+
+/*ZTE_BOOT_20121122 huang.yanjun merged from 8960*/
+#ifndef ZTE_BOOT_MODE
+#define ZTE_BOOT_MODE
+#endif
+
+/*
+ * Support for FTM & RECOVERY mode by ZTE_BOOT_JIA_20120305, jia.jia
+ * ZTE_PLATFORM
+ */
+#ifdef ZTE_BOOT_MODE
+#define SOCINFO_CMDLINE_BOOTMODE              "androidboot.mode="
+#define SOCINFO_CMDLINE_BOOTMODE_NORMAL       "normal"
+#define SOCINFO_CMDLINE_BOOTMODE_FTM          "ftm"
+#define SOCINFO_CMDLINE_BOOTMODE_RECOVERY     "recovery"
+#define SOCINFO_CMDLINE_BOOTMODE_FFBM     "ffbm"
+
+#define MAGIC_NUM_FTM_MODE          0x6D6D5446 /*FTMM*/
+#define MAGIC_NUM_NON_FTM_MODE      0x4D54464E /*NFTM*/
+
+/*
+ * Boot mode definition
+ */
+enum {
+    BOOT_MODE_NORMAL            = 0,
+    BOOT_MODE_FTM               = 1,
+    BOOT_MODE_RTC_ALARM         = 2,
+    BOOT_MODE_CHARGER           = 3,      //ZTE charge
+    BOOT_MODE_RECOVERY          = 4,
+    BOOT_MODE_FFBM              = 5,      //ZTE FFBM
+    BOOT_MODE_UNKNOWN,
+    BOOT_MODE_MAX
+};
+
+void socinfo_set_boot_mode(int boot_mode);
+int socinfo_get_ftm_flag(void);
+int socinfo_get_ffbm_flag(void);
+#endif
+
 /*
  * SOC version type with major number in the upper 16 bits and minor
  * number in the lower 16 bits.  For example:
@@ -177,6 +216,13 @@ const int cpu_is_krait(void);
 const int cpu_is_krait_v1(void);
 const int cpu_is_krait_v2(void);
 const int cpu_is_krait_v3(void);
+
+/*
+ * Support for reading board ID by ZTE_BOOT
+*/
+#ifdef ZTE_BOOT_MODE
+void socinfo_sync_sysfs_zte_hw_ver(const char *hw_ver);
+#endif
 
 static inline int cpu_is_msm7x01(void)
 {

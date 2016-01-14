@@ -9,7 +9,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
+/* 0409 yxl: cpr-uplift-max-volt 1350000->1330000 vdd-mx-vmax 1350000->1337500 */
 /* SPM controlled regulators: */
 
 &spmi_bus {

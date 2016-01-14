@@ -25,6 +25,46 @@
 #define WLAN_DATA1	41
 #define WLAN_DATA2	40
 
+#ifndef ZTE_PM_CONFIG_NC_GPIO //ZTE_PM_LHX_20140513 NC GPIOs should be configured as input,pull down and drive 2mA
+#define ZTE_PM_CONFIG_NC_GPIO 1
+#endif
+
+#ifdef ZTE_PM_CONFIG_NC_GPIO
+//ZTE_PM_LHX_20140513 NC GPIOs should be configured as input,pull down and drive 2mA
+static struct gpiomux_setting zte_noused_gpio_cfg = { 
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_IN,
+};
+
+#if defined(CONFIG_BOARD_WARP4) //P892S06
+static unsigned zte_nc_gpios[] ={0,1,2,3,10,11,14,15,20,21,22,23,49,50,53,54,55,56,60,62,73,74,75,79,80,85,86,90,91,92,93,94,95,96,97,98,103,104,109,110,111,112};
+#elif defined(CONFIG_BOARD_DRACONIS)//T57
+static unsigned zte_nc_gpios[] ={0,14,15,53,54,55,56,108,109};
+#else //default NC
+static unsigned zte_nc_gpios[]={255,255};
+#endif
+void zte_pm_nc_gpios_configs( unsigned *configs, unsigned nconfigs)
+{
+	unsigned c;
+	int rc;
+	if(255 == configs[0])
+	{
+		pr_info("ZTE_PM_GPIO no need to configure.\n");
+		return;
+	}
+	for (c = 0; c < nconfigs; ++c) {
+		rc = msm_gpiomux_write(configs[c], GPIOMUX_SUSPENDED,
+			&zte_noused_gpio_cfg, NULL);
+		if (rc)
+			pr_err("%s: write failure: %d\n", __func__, rc);
+	}
+}
+#endif
+
+
+
 #ifdef CONFIG_USB_EHCI_MSM_HSIC
 static struct gpiomux_setting hsic_sus_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
@@ -78,7 +118,7 @@ static struct msm_gpiomux_config msm_eth_configs[] = {
 
 static struct gpiomux_setting synaptics_int_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_8MA,
+	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_UP,
 };
 
@@ -90,8 +130,8 @@ static struct gpiomux_setting synaptics_int_sus_cfg = {
 
 static struct gpiomux_setting synaptics_reset_act_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_6MA,
-	.pull = GPIOMUX_PULL_DOWN,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
 };
 
 static struct gpiomux_setting synaptics_reset_sus_cfg = {
@@ -118,11 +158,16 @@ static struct gpiomux_setting gpio_spi_act_config = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+// IRDA_20131223 ++++++
+#if !defined(CONFIG_ICE40_IRDA)
 static struct gpiomux_setting gpio_spi_cs_act_config = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_6MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+#endif
+// IRDA_20131223 ------
+
 static struct gpiomux_setting gpio_spi_susp_config = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
@@ -165,6 +210,49 @@ static struct gpiomux_setting gpio_i2c_config = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
+/*For EXTERNAL OVP control*/
+#if defined(CONFIG_ZTE_EXTERNAL_OVP)
+static struct gpiomux_setting gpio_ext_ovp_active = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,//ext pull down 100k
+	.dir = GPIOMUX_OUT_LOW,
+};
+static struct msm_gpiomux_config msm_ext_ovp_configs[] __initdata = {
+	{
+		.gpio = 12,//ext_ovp_en
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &gpio_ext_ovp_active,
+			[GPIOMUX_SUSPENDED] = &gpio_ext_ovp_active,
+		},
+	},	
+};
+#endif
+/*For wireless charge charger path choose and switch*/
+#if defined(CONFIG_ZTE_CHGPATH_SWITCH)
+static struct gpiomux_setting gpio_chgdet_active = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_IN,
+};
+static struct msm_gpiomux_config msm_chgdet_configs[] __initdata = {
+	{
+		.gpio = 119,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &gpio_chgdet_active,
+			[GPIOMUX_SUSPENDED] = &gpio_chgdet_active,
+		},
+	},
+	{
+		.gpio = 120,
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &gpio_chgdet_active,
+			[GPIOMUX_SUSPENDED] = &gpio_chgdet_active,
+		},
+	},	
+};
+#endif
 static struct msm_gpiomux_config msm_keypad_configs[] __initdata = {
 	{
 		.gpio = 106,
@@ -201,6 +289,36 @@ static struct gpiomux_setting lcd_rst_sus_cfg = {
 	.drv = GPIOMUX_DRV_2MA,
 	.pull = GPIOMUX_PULL_DOWN,
 };
+static struct gpiomux_setting lcd_bl_active = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_OUT_HIGH,
+};
+static struct gpiomux_setting lcd_id_activity = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_IN,
+};
+static struct gpiomux_setting lcd_id_suspend = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_IN,
+};
+static struct gpiomux_setting lcd_5v_power_activity = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+	.dir = GPIOMUX_OUT_HIGH,
+};
+static struct gpiomux_setting lcd_5v_power_suspend = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_UP,
+	.dir = GPIOMUX_OUT_LOW,
+};
 
 static struct msm_gpiomux_config msm_lcd_configs[] __initdata = {
 	{
@@ -216,8 +334,66 @@ static struct msm_gpiomux_config msm_lcd_configs[] __initdata = {
 			[GPIOMUX_ACTIVE]    = &lcd_rst_act_cfg,
 			[GPIOMUX_SUSPENDED] = &lcd_rst_sus_cfg,
 		},
-	}
+	},
+	{			
+		.gpio = 23,		/* LCD_BL*/
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &lcd_bl_active,
+			[GPIOMUX_SUSPENDED] = &lcd_bl_active,
+		},
+	},
+	{
+		.gpio	= 4,		/* LCD_ID_0 */
+		.settings = {
+		[GPIOMUX_ACTIVE] = &lcd_id_activity,
+		[GPIOMUX_SUSPENDED] = &lcd_id_suspend,//zhengchao
+		},
+	},
+	{
+		.gpio	= 5,		/* LCD_ID_1 */
+		.settings = {
+		[GPIOMUX_ACTIVE] = &lcd_id_activity,
+		[GPIOMUX_SUSPENDED] = &lcd_id_suspend,//zhengchao
+		},
+	},
+	{
+		.gpio	= 33,		/* LCD_VDD_EN */ //pan add
+		.settings = {
+		[GPIOMUX_ACTIVE] = &lcd_5v_power_activity,
+		[GPIOMUX_SUSPENDED] = &lcd_5v_power_suspend,//zhengchao
+		},
+	},
+	{
+		.gpio	= 62,		/* LCD_VSN_EN */ //pan add
+		.settings = {
+		[GPIOMUX_ACTIVE] = &lcd_5v_power_activity,
+		[GPIOMUX_SUSPENDED] = &lcd_5v_power_suspend,//zhengchao
+		},
+	},
 };
+
+// IRDA_20131223 ++++++
+#if defined(CONFIG_ICE40_IRDA)
+static struct gpiomux_setting out_low_np_2ma = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_OUT_LOW,
+};
+static struct gpiomux_setting out_high_np_2ma = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+	.dir = GPIOMUX_OUT_HIGH,
+};
+static struct gpiomux_setting in_pd_2ma = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_IN,
+};
+#endif
+// IRDA_20131223 ------
 
 static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 	{
@@ -234,6 +410,7 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
 		},
 	},
+#if !defined(CONFIG_ICE40_IRDA)
 	{
 		.gpio      = 2,		/* BLSP1 QUP1 SPI_CS1 */
 		.settings = {
@@ -241,6 +418,15 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
 		},
 	},
+#else
+	{
+		.gpio      = 2,		/* BLSP1 QUP1 SPI_CS1 */
+		.settings = {
+			[GPIOMUX_ACTIVE] = &out_high_np_2ma,
+			[GPIOMUX_SUSPENDED] = &out_high_np_2ma,
+		},
+	},
+#endif
 	{
 		.gpio      = 3,		/* BLSP1 QUP1 SPI_CLK */
 		.settings = {
@@ -296,6 +482,31 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &gpio_i2c_config,
 		},
 	},
+// IRDA_20131223 ++++++
+#if defined(CONFIG_ICE40_IRDA)
+	{
+		.gpio = 54, /* ICE40 CDONE */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &in_pd_2ma,
+			[GPIOMUX_SUSPENDED] = &in_pd_2ma,
+		},
+	},
+	{
+		.gpio = 55, /* ICE40 RESET */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &out_high_np_2ma,
+			[GPIOMUX_SUSPENDED] = &out_high_np_2ma,
+		},
+	},
+	{
+		.gpio = 56, /* ICE40 3V3 EN */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &out_low_np_2ma,
+			[GPIOMUX_SUSPENDED] = &out_low_np_2ma,
+		},
+	},
+#endif
+// IRDA_20131223 ------
 };
 
 static struct msm_gpiomux_config msm_synaptics_configs[] __initdata = {
@@ -613,7 +824,7 @@ static struct gpiomux_setting gpio_suspend_config[] = {
 static struct gpiomux_setting cam_settings[] = {
 	{
 		.func = GPIOMUX_FUNC_1, /*active 1*/ /* 0 */
-		.drv = GPIOMUX_DRV_2MA,
+		.drv = GPIOMUX_DRV_4MA,//modify MCLK driver capacity to 4MA from 2MA by caidezun 20140707
 		.pull = GPIOMUX_PULL_NONE,
 	},
 
@@ -651,14 +862,23 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &cam_settings[1],
 		},
 	},
+#if 0// modified for CAM1 VAF
 	{
 		.gpio = 27, /* CAM_MCLK1 */
 		.settings = {
 			[GPIOMUX_ACTIVE]    = &cam_settings[0],
 			[GPIOMUX_SUSPENDED] = &cam_settings[1],
 		},
-
 	},
+#else
+	{
+		.gpio = 27, /* CAM1 VAF */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
+#endif
 	{
 		.gpio = 29, /* CCI_I2C_SDA0 */
 		.settings = {
@@ -701,10 +921,52 @@ static struct msm_gpiomux_config msm_sensor_configs[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &cam_settings[4],
 		},
 	},
-
+	{
+		.gpio = 67,/* CAM1_DVDD */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
+	{
+		.gpio = 66,/* CAM2_DVDD */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
+	{
+		.gpio = 34, /* CAM1&&CAM2 IOVDD */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
+	{
+		.gpio = 69, /* CAM1&&CAM2 AVDD */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},	
+	{
+		.gpio = 31, /* CAM1 TORCH */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
+	{
+		.gpio = 32, /* CAM1 FLASH */
+		.settings = {
+			[GPIOMUX_ACTIVE]    = &cam_settings[3],
+			[GPIOMUX_SUSPENDED] = &cam_settings[4],
+		},
+	},
 };
 
 static struct msm_gpiomux_config msm_sensor_configs_skuf_plus[] __initdata = {
+#if 0
 	{
 		.gpio = 22, /* CAM1_VDD */
 		.settings = {
@@ -719,8 +981,41 @@ static struct msm_gpiomux_config msm_sensor_configs_skuf_plus[] __initdata = {
 			[GPIOMUX_SUSPENDED] = &cam_settings[4],
 		},
 	},
+#endif	
 };
 
+//
+static struct gpiomux_setting spk_sus_cfg = {
+		.func = GPIOMUX_FUNC_GPIO,  /* O-LOW */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_NONE,
+		.dir = GPIOMUX_OUT_LOW,
+};
+
+static struct gpiomux_setting spk_act_cfg = {
+		.func = GPIOMUX_FUNC_GPIO,  /* O-LOW */
+		.drv = GPIOMUX_DRV_2MA,
+		.pull = GPIOMUX_PULL_NONE,
+		.dir = GPIOMUX_OUT_HIGH,
+};
+
+static struct msm_gpiomux_config msm_spk_gpio_configs[] __initdata = {
+	{
+		.gpio = 51,
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &spk_sus_cfg,
+			[GPIOMUX_ACTIVE] = &spk_act_cfg,
+		},
+	},
+	{
+		.gpio = 52,
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &spk_sus_cfg,
+			[GPIOMUX_ACTIVE] = &spk_act_cfg,
+		},
+	},
+};
+//
 
 static struct gpiomux_setting auxpcm_act_cfg = {
 	.func = GPIOMUX_FUNC_1,
@@ -729,11 +1024,14 @@ static struct gpiomux_setting auxpcm_act_cfg = {
 };
 
 static struct gpiomux_setting auxpcm_sus_cfg = {
-	.func = GPIOMUX_FUNC_1,
+	//.func = GPIOMUX_FUNC_1,
+	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_DOWN,
+	//.pull = GPIOMUX_PULL_DOWN,
+	.pull = GPIOMUX_PULL_UP,
 };
 
+//GPIO63:acc int GPIO64:gyro int GPIO65:prox/light int
 static struct msm_gpiomux_config msm_auxpcm_configs[] __initdata = {
 	{
 		.gpio = 63,
@@ -756,29 +1054,43 @@ static struct msm_gpiomux_config msm_auxpcm_configs[] __initdata = {
 			[GPIOMUX_ACTIVE] = &auxpcm_act_cfg,
 		},
 	},
-	{
-		.gpio = 66,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &auxpcm_sus_cfg,
-			[GPIOMUX_ACTIVE] = &auxpcm_act_cfg,
-		},
-	},
+	
 };
-
+#if 0//deleted by caidezun because gpio67 is used for CAM1_DVDD
 static struct gpiomux_setting usb_otg_sw_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
 	.dir = GPIOMUX_OUT_LOW,
 };
-
+#endif
 static struct msm_gpiomux_config usb_otg_sw_configs[] __initdata = {
+#if 0
 	{
 		.gpio = 67,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &usb_otg_sw_cfg,
 		},
 	},
+#endif
 };
+
+//zte weizhijun codec electricity start
+static struct gpiomux_setting tapan_reset = {
+       .func = GPIOMUX_FUNC_GPIO,
+       .drv = GPIOMUX_DRV_6MA,
+       .pull = GPIOMUX_PULL_NONE,
+       .dir = GPIOMUX_OUT_LOW,
+};
+
+static struct msm_gpiomux_config msm_tapan_config[] __initdata = {
+       {
+               .gpio   = 72,           /* SYS_RST_N */
+               .settings = {
+                       [GPIOMUX_SUSPENDED] = &tapan_reset,
+               },
+       },
+};
+//zte weizhijun codec electricity end
 
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
 static struct gpiomux_setting sdc3_clk_actv_cfg = {
@@ -874,6 +1186,10 @@ void __init msm8226_init_gpiomux(void)
 		pr_err("%s failed %d\n", __func__, rc);
 		return;
 	}
+#ifdef ZTE_PM_CONFIG_NC_GPIO
+	zte_pm_nc_gpios_configs(zte_nc_gpios,ARRAY_SIZE(zte_nc_gpios));
+	printk("ZTE_PM_GPIO configure noused gpios\n");
+#endif
 
 #if defined(CONFIG_KS8851) || defined(CONFIG_KS8851_MODULE)
 	msm_gpiomux_install(msm_eth_configs, ARRAY_SIZE(msm_eth_configs));
@@ -914,7 +1230,10 @@ void __init msm8226_init_gpiomux(void)
 
 	msm_gpiomux_install(msm_auxpcm_configs,
 			ARRAY_SIZE(msm_auxpcm_configs));
+	msm_gpiomux_install(msm_spk_gpio_configs,
+			ARRAY_SIZE(msm_spk_gpio_configs));
 
+    msm_gpiomux_install(msm_tapan_config, ARRAY_SIZE(msm_tapan_config));
 	if (of_board_is_cdp() || of_board_is_mtp() || of_board_is_xpm())
 		msm_gpiomux_install(usb_otg_sw_configs,
 					ARRAY_SIZE(usb_otg_sw_configs));
@@ -932,6 +1251,16 @@ void __init msm8226_init_gpiomux(void)
 		msm_hsic_configs[1].gpio = 120; /* DATA */
 	}
 	msm_gpiomux_install(msm_hsic_configs, ARRAY_SIZE(msm_hsic_configs));
+#endif
+
+#if defined(CONFIG_ZTE_EXTERNAL_OVP)
+	msm_gpiomux_install(msm_ext_ovp_configs,
+			ARRAY_SIZE(msm_ext_ovp_configs));
+#endif
+
+#if defined(CONFIG_ZTE_CHGPATH_SWITCH)
+	msm_gpiomux_install(msm_chgdet_configs,
+			ARRAY_SIZE(msm_chgdet_configs));
 #endif
 }
 

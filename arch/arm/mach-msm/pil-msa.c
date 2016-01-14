@@ -20,6 +20,7 @@
 #include <linux/err.h>
 #include <linux/regulator/consumer.h>
 #include <linux/dma-mapping.h>
+#include <linux/reboot.h>
 
 #include "peripheral-loader.h"
 #include "pil-q6v5.h"
@@ -232,8 +233,13 @@ static int pil_msa_pbl_reset(struct pil_desc *pil)
 	/* Wait for MBA to start. Check for PBL and MBA errors while waiting. */
 	if (drv->self_auth) {
 		ret = pil_msa_wait_for_mba_ready(drv);
-		if (ret)
+		if (ret) {
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+			kernel_restart("unauth");
+#endif
+
 			goto err_q6v5_reset;
+		}
 	}
 
 	drv->is_booted = true;
@@ -330,6 +336,11 @@ static int pil_msa_mba_init_image(struct pil_desc *pil,
 
 	dma_free_coherent(pil->dev, size, mdata_virt, mdata_phys);
 
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+	if (ret) {
+		kernel_restart("unauth");
+	}
+#endif
 	return ret;
 }
 
@@ -374,6 +385,12 @@ static int pil_msa_mba_auth(struct pil_desc *pil)
 		dev_err(pil->dev, "MBA returned error %d for image\n", status);
 		ret = -EINVAL;
 	}
+
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+	if (ret) {
+		kernel_restart("unauth");
+	}
+#endif
 
 	return ret;
 }

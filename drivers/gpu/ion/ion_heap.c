@@ -141,12 +141,27 @@ int ion_heap_pages_zero(struct page **pages, int num_pages)
 		if (!ptr)
 			return -ENOMEM;
 
+/*
+  * modified by caidezun to fix preview block issue 20140410
+  * patch is from Qcom , case 01507379 .
+  *
+  */
+#if 0
+		 memset(ptr, 0, npages_to_vmap * PAGE_SIZE);
 		/*
 		 * We have to invalidate the cache here because there
 		 * might be dirty lines to these physical pages (which
 		 * we don't care about) that could get written out at
 		 * any moment.
 		 */
+#else
+		/*
+		 * We have to invalidate the cache here because there
+		 * might be dirty lines to these physical pages (which
+		 * we don't care about) that could get written out at
+		 * any moment.
+		 */
+#endif
 		for (k = 0; k < npages_to_vmap; k++) {
 			void *p = kmap_atomic(pages[i + k]);
 			phys_addr_t phys = page_to_phys(

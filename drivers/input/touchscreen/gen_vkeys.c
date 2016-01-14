@@ -24,7 +24,7 @@
 #define HEIGHT_SCALE_NUM 8
 #define HEIGHT_SCALE_DENOM 10
 
-#define VKEY_Y_OFFSET_DEFAULT 0
+#define VKEY_Y_OFFSET_DEFAULT 10
 
 /* numerator and denomenator for border equations */
 #define BORDER_ADJUST_NUM 3
@@ -153,26 +153,53 @@ static int __devinit vkeys_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "pdata is invalid\n");
 		return -EINVAL;
 	}
-
+	#if 0
 	border = (pdata->panel_maxx - pdata->disp_maxx) * 2;
 	width = ((pdata->disp_maxx - (border * (pdata->num_keys - 1)))
 			/ pdata->num_keys);
 	height = (pdata->panel_maxy - pdata->disp_maxy);
 	center_y = pdata->disp_maxy + (height / 2) + pdata->y_offset;
 	height = height * HEIGHT_SCALE_NUM / HEIGHT_SCALE_DENOM;
-
 	x2 -= border * BORDER_ADJUST_NUM / BORDER_ADJUST_DENOM;
+	#endif
+	#ifdef CONFIG_BOARD_DRACONIS
+	//border :(distance between two keys)/2
+	border = ((pdata->panel_maxx/ (pdata->num_keys*6))*3)/2 ;
+	//and distance=width of key
+	width = (pdata->panel_maxx/ (pdata->num_keys*6))*2;
+	height = (pdata->panel_maxy - pdata->disp_maxy);
+	center_y = pdata->disp_maxy + (height / 2) + pdata->y_offset;
+	//x2 -= border;
 
 	for (i = 0; i < pdata->num_keys; i++) {
-		x1 = x2 + border;
-		x2 = x2 + border + width;
+		x1 = x2 + border*2;
+		x2 = x2 + border*2 + width;		
+		center_x = x1 + (x2 - x1) / 2;
+		c += snprintf(vkey_buf + c, MAX_BUF_SIZE - c,
+				"%s:%d:%d:%d:%d:%d\n",
+				VKEY_VER_CODE, pdata->keycodes[i],
+				center_x, center_y, width, height);
+	}	
+	#else
+	//border :(distance between two keys)/2
+	border = (pdata->panel_maxx/ (pdata->num_keys*4)) ;
+	//and distance=width of key
+	width = ((pdata->disp_maxx - (border * pdata->num_keys*2 ))
+			/ pdata->num_keys);
+	height = (pdata->panel_maxy - pdata->disp_maxy);
+	center_y = pdata->disp_maxy + (height / 2) + pdata->y_offset;
+	x2 -= border;
+
+	for (i = 0; i < pdata->num_keys; i++) {
+		x1 = x2 + border*2;
+		x2 = x2 + border*2 + width;		
 		center_x = x1 + (x2 - x1) / 2;
 		c += snprintf(vkey_buf + c, MAX_BUF_SIZE - c,
 				"%s:%d:%d:%d:%d:%d\n",
 				VKEY_VER_CODE, pdata->keycodes[i],
 				center_x, center_y, width, height);
 	}
-
+	#endif
 	vkey_buf[c] = '\0';
 
 	name = devm_kzalloc(&pdev->dev, sizeof(*name) * MAX_BUF_SIZE,
@@ -183,13 +210,15 @@ static int __devinit vkeys_probe(struct platform_device *pdev)
 	snprintf(name, MAX_BUF_SIZE,
 				"virtualkeys.%s", pdata->name);
 	vkey_obj_attr.attr.name = name;
-
-	vkey_obj = kobject_create_and_add("board_properties", NULL);
-	if (!vkey_obj) {
-		dev_err(&pdev->dev, "unable to create kobject\n");
-		return -ENOMEM;
+	
+	if(!vkey_obj){
+		vkey_obj = kobject_create_and_add("board_properties", NULL);
+		if (!vkey_obj) {
+			dev_err(&pdev->dev, "unable to create kobject\n");
+			return -ENOMEM;
+		}
 	}
-
+	
 	ret = sysfs_create_group(vkey_obj, &vkey_grp);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to create attributes\n");

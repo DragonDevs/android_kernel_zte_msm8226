@@ -14,7 +14,7 @@
 
 &soc {
 	serial@f991f000 {
-		status = "ok";
+		status = "disable";
 	};
 
 	i2c@f9927000 { /* BLSP1 QUP5 */
@@ -36,6 +36,7 @@
 	};
 
 	i2c@f9925000 { /* BLSP1 QUP3 */
+		/*
 		nfc-nci@0e {
 			compatible = "qcom,nfc-nci";
 			reg = <0x0e>;
@@ -47,38 +48,10 @@
 			interrupts = <21 0>;
 			qcom,clk-gpio = <&pm8226_gpios 3 0>;
 		};
-	};
-	gpio_keys {
-		compatible = "gpio-keys";
-		input-name = "gpio-keys";
+		*/
+	}; 
+	
 
-		camera_focus {
-			label = "camera_focus";
-			gpios = <&msmgpio 108 0x1>;
-			linux,input-type = <1>;
-			linux,code = <0x210>;
-			gpio-key,wakeup;
-			debounce-interval = <15>;
-		};
-
-		camera_snapshot {
-			label = "camera_snapshot";
-			gpios = <&msmgpio 107 0x1>;
-			linux,input-type = <1>;
-			linux,code = <0x2fe>;
-			gpio-key,wakeup;
-			debounce-interval = <15>;
-		};
-
-		vol_up {
-			label = "volume_up";
-			gpios = <&msmgpio 106 0x1>;
-			linux,input-type = <1>;
-			linux,code = <115>;
-			gpio-key,wakeup;
-			debounce-interval = <15>;
-		};
-	};
 
 	spi@f9923000 {
 		ethernet-switch@3 {
@@ -97,10 +70,14 @@
 		qcom,audio-routing =
 			"RX_BIAS", "MCLK",
 			"LDO_H", "MCLK",
+			"Lineout_1 amp", "LINEOUT1",
+			"Lineout_2 amp", "LINEOUT2",
 			"SPK_OUT", "MCLK",
 			"SPK_OUT", "EXT_VDD_SPKR",
 			"AMIC1", "MIC BIAS1 External",
 			"MIC BIAS1 External", "Handset Mic",
+			"AMIC3", "MIC BIAS1 External",
+			"MIC BIAS1 External", "Fluence Mic",
 			"AMIC2", "MIC BIAS2 External",
 			"MIC BIAS2 External", "Headset Mic",
 			"AMIC4", "MIC BIAS2 External",
@@ -255,21 +232,6 @@
 
 &spmi_bus {
 	qcom,pm8226@0 {
-		qcom,leds@a100 {
-			status = "okay";
-			qcom,led_mpp_2 {
-				label = "mpp";
-				linux,name = "button-backlight";
-				linux,default-trigger = "none";
-				qcom,default-state = "off";
-				qcom,max-current = <40>;
-				qcom,current-setting = <5>;
-				qcom,id = <6>;
-				qcom,mode = "manual";
-				qcom,source-sel = <1>;
-				qcom,mode-ctrl = <0x60>;
-			};
-		};
 
 		qcom,leds@a300 {
 			status = "okay";
@@ -287,12 +249,10 @@
 				qcom,mode-ctrl = <0x60>;
 				qcom,pwm-channel = <0>;
 				qcom,start-idx = <1>;
-				qcom,ramp-step-ms = <120>;
-				qcom,duty-pcts = [00 00 00 00 00
-						  00 00 00 00 00
-						  50 00 00 00 00
-						  00 00 00 00 00
-						  00];
+				qcom,ramp-step-ms = <1>;
+				qcom,duty-pcts = [00 10 20 30];
+				qcom,pause-lo = <3500>;
+				qcom,pause-hi = <250>;
 				qcom,use-blink;
 			};
 		};
@@ -313,12 +273,10 @@
 				qcom,source-sel = <10>;
 				qcom,pwm-channel = <5>;
 				qcom,start-idx = <1>;
-				qcom,ramp-step-ms = <120>;
-				qcom,duty-pcts = [00 00 00 00 00
-						  00 00 00 00 00
-						  50 00 00 00 00
-						  00 00 00 00 00
-						  00];
+				qcom,ramp-step-ms = <1>;
+				qcom,duty-pcts = [00 10 20 30];
+				qcom,pause-lo = <3500>;
+				qcom,pause-hi = <250>;
 				qcom,use-blink;
 			};
 		};
@@ -330,7 +288,7 @@
                 };
 
 		qcom,leds@d800 {
-			status = "okay";
+			status = "disabled";
 			qcom,wled_0 {
 				label = "wled";
 				linux,name = "wled:backlight";
@@ -375,15 +333,19 @@
 		qcom,pull = <5>;
 		qcom,vin-sel = <3>;
 		qcom,out-strength = <3>;
-		qcom,src-sel = <2>;
+		qcom,src-sel = <0>;
 		qcom,master-en = <1>;
-	};
+	};	
 
 	gpio@c200 { /* GPIO 3 */
-		qcom,mode = <0>;		/* QPNP_PIN_MODE_DIG_IN */
-		qcom,pull = <5>;		/* QPNP_PIN_PULL_NO */
-		qcom,vin-sel = <2>;		/* QPNP_PIN_VIN2 */
-		qcom,src-sel = <2>;		/* QPNP_PIN_SEL_FUNC_1 */
+		/* Battery_Switch enable,default output low*/
+		qcom,mode = <1>;
+		qcom,output-type = <0>;
+		qcom,pull = <5>;
+		qcom,invert = <0>;
+		qcom,vin-sel = <3>;
+		qcom,out-strength = <3>;
+		qcom,src-sel = <0>;
 		qcom,master-en = <1>;
 	};
 
@@ -486,13 +448,12 @@
 };
 
 &pm8226_chg {
-	qcom,charging-disabled;
+	/*qcom,charging-disabled;*/
 	qcom,battery-data = <&mtp_batterydata>;
 };
 
 &slim_msm {
 	tapan_codec {
-		qcom,cdc-micbias1-ext-cap;
 	};
 };
 

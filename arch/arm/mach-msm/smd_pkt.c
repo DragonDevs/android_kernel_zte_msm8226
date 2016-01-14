@@ -93,7 +93,7 @@ static uint32_t is_modem_smsm_inited(void);
 #define SMD_PKT_IPC_LOG_PAGE_CNT 2
 static void *smd_pkt_ilctxt;
 
-static int msm_smd_pkt_debug_mask;
+static int msm_smd_pkt_debug_mask = 8 ;
 module_param_named(debug_mask, msm_smd_pkt_debug_mask,
 		int, S_IRUGO | S_IWUSR | S_IWGRP);
 
@@ -324,6 +324,11 @@ static long smd_pkt_ioctl(struct file *file, unsigned int cmd,
 	return ret;
 }
 
+extern int zte_qmi_data_wakeup;		//zte jiangfeng
+extern int zte_qmi_state_change_wakeup;		//zte jiangfeng
+unsigned char is_qmi_channel(char* channel_name);
+
+extern int zte_smdctl_wakeup;
 ssize_t smd_pkt_read(struct file *file,
 		       char __user *buf,
 		       size_t count,
@@ -334,6 +339,15 @@ ssize_t smd_pkt_read(struct file *file,
 	int pkt_size;
 	struct smd_pkt_dev *smd_pkt_devp;
 	unsigned long flags;
+	//zte jiangfeng add
+	unsigned char i_f_type;
+	unsigned int length;
+	unsigned char service_id;
+	unsigned char client_id;
+	unsigned char ctrl_type;
+	unsigned int traction_id;
+	unsigned int message_id;
+	//zte jiangfeng add, end
 
 	smd_pkt_devp = file->private_data;
 
@@ -432,8 +446,52 @@ wait_for_packet:
 			return notify_reset(smd_pkt_devp);
 		}
 	} while (pkt_size != bytes_read);
-	D_READ_DUMP_BUFFER("Read: ", (bytes_read > 16 ? 16 : bytes_read), buf);
+	//D_READ_DUMP_BUFFER("Read: ", (bytes_read > 16 ? 16 : bytes_read), buf);
+	if(zte_smdctl_wakeup)
+	   {
+	     printk("SMD ch %u  data event ",smd_pkt_devp->ch->n );
+	     printk("SMD ch %s data event ",&smd_pkt_devp->ch->name[0]);
+	     D_READ_DUMP_BUFFER("Read: ", (bytes_read > 16 ? 16 : bytes_read), buf);
+		 zte_smdctl_wakeup = 0;
+		}
+
 	mutex_unlock(&smd_pkt_devp->rx_lock);
+
+	//zte jiangfeng add
+    /* Control Channel Mesage
+    ------------------------------------------------------------------------------
+    type:       I/F type | Length| Control Flags| Service Type| Client ID| QMUX SDU|
+    ------------------------------------------------------------------------------
+                         | QMUX Header                                   |
+    ------------------------------------------------------------------------------
+    size(byte):     1     |   2      |         1         |         1         |     1      |
+    ------------------------------------------------------------------------------
+
+    QMUX SDU
+    ------------------------------------------------------------------------------
+    type:		 Control Flags| contraction id| message ID| length|
+    ------------------------------------------------------------------------------
+    size(byte):          1		  |   2           | 	 2	      |    2	   |
+    ------------------------------------------------------------------------------
+     */
+	//printk("QMI recev %d bytes\n",bytes_read);
+	if(zte_qmi_data_wakeup	&& is_qmi_channel(smd_pkt_devp->ch->name))
+	{
+		if(bytes_read	> 15)
+		{
+			i_f_type	=	*buf;
+			length	=	(*(buf+1)<<8) +*(buf+2);
+			service_id	=	*(buf+4);
+			client_id	=	*(buf+5);
+			ctrl_type	=	*(buf+6);
+			traction_id	=	(*(buf+7)<<8) +*(buf+8);
+			message_id	=	(*(buf+10)<<8) +*(buf+9);
+			printk("QMI recev: channel %s, I/F type: 0x%x, service id 0x%x, client id: 0x%x, ctrl type 0x%x, traction id: 0x%x, message id 0x%x\n",
+				smd_pkt_devp->ch->name,i_f_type, service_id, client_id, ctrl_type, traction_id, message_id);
+		}
+		zte_qmi_data_wakeup =	0;
+	}
+	//zte jiangfeng add, end
 
 	mutex_lock(&smd_pkt_devp->ch_lock);
 	spin_lock_irqsave(&smd_pkt_devp->pa_spinlock, flags);
@@ -663,6 +721,15 @@ static void ch_notify(void *priv, unsigned event)
 	case SMD_EVENT_OPEN:
 		D_STATUS("%s: OPEN event in smd_pkt_dev id:%d\n",
 			  __func__, smd_pkt_devp->i);
+		//zte jiangfenf add
+		if(zte_qmi_state_change_wakeup && is_qmi_channel(smd_pkt_devp->ch->name))
+		{
+			printk("%s: OPEN event in smd_pkt_dev id:%d\n",
+				  __func__, smd_pkt_devp->i);
+			zte_qmi_state_change_wakeup	=	0;
+		}
+		//zte jiangfenf add, end
+			
 		smd_pkt_devp->has_reset = 0;
 		smd_pkt_devp->is_open = 1;
 		wake_up_interruptible(&smd_pkt_devp->ch_opened_wait_queue);
@@ -670,6 +737,16 @@ static void ch_notify(void *priv, unsigned event)
 	case SMD_EVENT_CLOSE:
 		D_STATUS("%s: CLOSE event in smd_pkt_dev id:%d\n",
 			  __func__, smd_pkt_devp->i);
+		
+		//zte jiangfenf add
+		if(zte_qmi_state_change_wakeup && is_qmi_channel(smd_pkt_devp->ch->name))
+		{
+			printk("%s: OPEN event in smd_pkt_dev id:%d\n",
+				  __func__, smd_pkt_devp->i);
+			zte_qmi_state_change_wakeup	=	0;
+		}
+		//zte jiangfenf add, end
+
 		smd_pkt_devp->is_open = 0;
 		/* put port into reset state */
 		clean_and_signal(smd_pkt_devp);
@@ -769,6 +846,30 @@ static char *smd_ch_name[] = {
 	"apr",
 	"LOOPBACK",
 };
+
+//zte jiangfeng add
+// this function shall change accrod with smd_ch_name[]
+unsigned char is_qmi_channel(char* channel_name)
+{
+	unsigned char data_channel = 0;
+	if(strstr(channel_name,"DATA"))
+	{
+		data_channel	=	*(channel_name+4) - 0x30;
+		if(*(channel_name+6)	==	'_')
+		{
+			data_channel = data_channel*10 + (*(channel_name+5)-0x30);
+		}
+		//printk("channel name: %s, data channel %d\n", channel_name,data_channel);
+
+		if((data_channel> 4 && data_channel<10)	|| (data_channel> 11 && data_channel<18)
+			|| (data_channel> 22 && data_channel<32)	|| data_channel==40)
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+//zte jiangfeng add, end
 
 static uint32_t smd_ch_edge[] = {
 	SMD_APPS_MODEM,

@@ -169,6 +169,23 @@ struct lcd_panel_info {
 	u32 yres_pad;
 };
 
+/*****************************************
+  ***5.7 720p   panel id from100 to 150***
+  ***5.5 1920p panel id from200 to 250***
+  **********************************
+  Not recommended to use the enum 
+      unless you have not other better method
+  *****************************************/
+enum {
+		LCD_PANEL_NOPANEL,
+		LCD_PANEL_5P7_OTM1283A_BOE_BOE = 100,
+	  	LCD_PANEL_5P7_OTM1283A_CPT,
+	 	LCD_PANEL_5P7_OTM1283A_AUO_LEAD,
+
+		LCD_PANEL_5P5_NT35596_AUO = 200,
+		
+	 	LCD_PANEL_MAX
+};
 
 /* DSI PHY configuration */
 struct mdss_dsi_phy_ctrl {
@@ -302,6 +319,7 @@ struct mdss_panel_info {
 	u32 roi_h;
 	int bklt_ctrl;	/* backlight ctrl */
 	int pwm_pmic_gpio;
+	int bl_cmd_gpio;
 	int pwm_lpg_chan;
 	int pwm_period;
 	u32 mode_gpio_state;
@@ -309,6 +327,10 @@ struct mdss_panel_info {
 	bool ulps_feature_enabled;
 	char dfps_update;
 	int new_fps;
+
+	u32 height;			/* height of picture in mm    */
+	u32 width;			/* width of picture in mm     */
+
 	int panel_max_fps;
 	int panel_max_vtotal;
 	u32 cont_splash_enabled;

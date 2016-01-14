@@ -20,12 +20,286 @@
 #include <mach/rpm-regulator-smd.h>
 #include <linux/regulator/consumer.h>
 
+/*
+ * Added for engineering mode of camera sensor by ZTE_JIA_20130620 jia.jia
+ */
+#if defined(CONFIG_MSM_CAMERA_EMODE)
+#include <linux/sysdev.h>
+#endif /* CONFIG_MSM_CAMERA_EMODE */
+
+//#define CONFIG_MSMB_CAMERA_DEBUG
 #undef CDBG
 #ifdef CONFIG_MSMB_CAMERA_DEBUG
 #define CDBG(fmt, args...) pr_err(fmt, ##args)
 #else
 #define CDBG(fmt, args...) do { } while (0)
 #endif
+
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+#ifdef CONFIG_ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
+static int registed_sensor[2] = {0}; 
+#endif
+// <---
+
+struct msm_sensor_module_info_t module_info[2];
+#if defined(CONFIG_MSM_CAMERA_EMODE)
+#define MSM_SENSOR_SYSDEV_NUM_MAX  (2)
+typedef struct {
+	uint16_t id;
+	char *name;
+} msm_sensor_sysdev_info_t;
+
+static msm_sensor_sysdev_info_t msm_sensor_sysdev_info[MSM_SENSOR_SYSDEV_NUM_MAX];
+
+static struct sysdev_class msm_sensor_sysdev_class = {
+	.name = "camera"
+};
+
+static struct sys_device msm_sensor_sysdev[MSM_SENSOR_SYSDEV_NUM_MAX];
+
+
+static ssize_t show_msm_sensor_id(struct sys_device *dev, struct sysdev_attribute *attr, char *buf)
+{
+	int32_t index;
+	const char *ptr = NULL;
+	uint16_t id;
+
+	if (dev->kobj.name) {
+		ptr = dev->kobj.name + strlen(msm_sensor_sysdev_class.name);
+		printk("wly: %s,   %s,  %d \n\n",ptr, dev->kobj.name, strlen(msm_sensor_sysdev_class.name));
+		index = (int32_t)simple_strtol(ptr, NULL, 10);
+		id = msm_sensor_sysdev_info[index].id;
+	} else {
+		id = -1;
+	}
+
+	return snprintf(buf, PAGE_SIZE, "0x%x\n", id);
+}
+static SYSDEV_ATTR(id, S_IRUGO|S_IWUSR, show_msm_sensor_id, NULL);
+static ssize_t show_msm_sensor_name(struct sys_device *dev, struct sysdev_attribute *attr, char *buf)
+{
+	uint16_t len = 0;
+	int32_t index;
+	const char *ptr = NULL;
+	if (dev->kobj.name) {
+		ptr = dev->kobj.name + strlen(msm_sensor_sysdev_class.name);
+		index = (int32_t)simple_strtol(ptr, NULL, 10);
+		}
+	else index= 0;
+	len += sprintf(buf+len,  "%s \n", module_info[index].module_name);
+	printk("wlywly: %s\n",buf);
+	return len;
+}
+static SYSDEV_ATTR(name, S_IRUGO|S_IWUSR, show_msm_sensor_name, NULL);
+
+static struct sysdev_attribute *msm_sensor_sysdev_attrs[] = {
+	&attr_id,
+	&attr_name,
+};
+
+/*
+ * MSM Camera Sensor Sys Device Register
+ *
+ * 1. Rear Camera Sensor:
+ *    id: "/sys/devices/system/camera/camera0/id" 
+ *    name: "/sys/devices/system/camera/camera0/name"
+ *
+ * 2. Front Camera Sensor:
+ *    id: "/sys/devices/system/camera/camera1/id"
+ *    name: "/sys/devices/system/camera/camera1/name"
+ */
+static void msm_sensor_register_sysdev(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	static int32_t sysdev_num = 0;
+	int32_t index, i;
+	int32_t ret;
+
+	if (!sysdev_num) {
+		ret = sysdev_class_register(&msm_sensor_sysdev_class);
+		if (ret) {
+			return;
+		}
+	}
+
+	if (sysdev_num >= MSM_SENSOR_SYSDEV_NUM_MAX) {
+		return;
+	}
+
+	index = sysdev_num++;
+#if 1
+	printk("wlywly: %d\n",index);
+	msm_sensor_sysdev_info[index].id = s_ctrl->sensordata->slave_info->sensor_id;
+#endif
+/*
+  * camera sensor module compatile
+  *
+  * by ZTE_YCM_20140509 yi.changming
+  */
+// --->
+#if 0
+	if(strlen(s_ctrl->module_name)){
+		snprintf(module_info[index].module_name, 64, "module name: %s", s_ctrl->module_name);
+	}else{
+		snprintf(module_info[index].module_name, 64, "module name: %s",s_ctrl->sensordata->sensor_name);
+	}
+#else
+	if(s_ctrl->module_name && strlen(s_ctrl->module_name)){
+		snprintf(module_info[index].module_name, 64, "module name: %s", s_ctrl->module_name);
+	}else{
+		snprintf(module_info[index].module_name, 64, "module name: %s",s_ctrl->sensordata->sensor_name);
+	}
+
+#endif
+// <---
+	msm_sensor_sysdev[index].id = index;
+	msm_sensor_sysdev[index].cls = &msm_sensor_sysdev_class;
+	ret = sysdev_register(&msm_sensor_sysdev[index]);
+	if (ret) {
+		sysdev_class_unregister(&msm_sensor_sysdev_class);
+		return;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(msm_sensor_sysdev_attrs); ++i) {
+		ret = sysdev_create_file(&msm_sensor_sysdev[index], msm_sensor_sysdev_attrs[i]);
+		if (ret) {
+			goto register_sysdev_error;
+		}
+	}
+
+	return;
+
+register_sysdev_error:
+
+	while (--i >= 0) sysdev_remove_file(&msm_sensor_sysdev[index], msm_sensor_sysdev_attrs[i]);
+
+	sysdev_unregister(&msm_sensor_sysdev[index]);
+	sysdev_class_unregister(&msm_sensor_sysdev_class);
+
+	return;
+}
+#endif /* CONFIG_MSM_CAMERA_EMODE */
+
+/*
+* add by wuxiaoliang from 8930 for mipi test interface
+*/
+static int msm_sensor_debugfs_test_s(void *data, u64 val)
+{
+	struct msm_sensor_ctrl_t *s_ctrl = (struct msm_sensor_ctrl_t *) data;
+	
+	if(!s_ctrl->msm_sensor_reg_default_data_type)
+		s_ctrl->msm_sensor_reg_default_data_type=1;
+	
+	s_ctrl->msm_sensor_reg_default_data_type=val;
+	
+	return 0;
+}
+
+static int msm_sensor_debugfs_test_g(void *data, u64 *val)
+{
+	struct msm_sensor_ctrl_t *s_ctrl = (struct msm_sensor_ctrl_t *) data;
+	
+	if(!s_ctrl->msm_sensor_reg_default_data_type)
+		s_ctrl->msm_sensor_reg_default_data_type=1;
+	
+	*val=s_ctrl->msm_sensor_reg_default_data_type;
+	
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(sensor_debugfs_test, msm_sensor_debugfs_test_g,
+			msm_sensor_debugfs_test_s, "%llx\n");
+
+uint64_t address_for_mipi_test=0;
+static int msm_sensor_debugfs_setaddr(void *data, u64 val)
+{
+	pr_err("set address to : 0x%llx\n", val);
+	address_for_mipi_test=val;
+	return 0;
+}
+
+static int msm_sensor_debugfs_getaddr(void *data, u64 *val)
+{
+	*val=address_for_mipi_test;
+	pr_err("current address is : 0x%llx\n", address_for_mipi_test);
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(sensor_debugfs_address, msm_sensor_debugfs_getaddr,
+			msm_sensor_debugfs_setaddr, "%llx\n");
+
+static int msm_sensor_debugfs_setvalue(void *data, u64 val)
+{
+	
+	struct msm_sensor_ctrl_t *s_ctrl = (struct msm_sensor_ctrl_t *) data;
+	int32_t rc = 0;
+	pr_err("address is : 0x%llx value  is: %llx\n", address_for_mipi_test,val);
+	rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+			s_ctrl->sensor_i2c_client,
+			address_for_mipi_test, val,
+			 s_ctrl->msm_sensor_reg_default_data_type);
+	if (rc < 0) {
+		pr_err("%s: %s: i2c write %llx failed\n", __func__,
+			s_ctrl->sensordata->sensor_name,val);
+		return rc;
+	}
+	return 0;
+}
+
+static int msm_sensor_debugfs_getvalue(void *data, u64 *val)
+{
+	
+	struct msm_sensor_ctrl_t *s_ctrl = (struct msm_sensor_ctrl_t *) data;
+	int32_t rc = 0;
+	uint16_t temp;
+	pr_err("address_for_mipi_test=0x%llx \n", address_for_mipi_test);
+	rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_read(
+			s_ctrl->sensor_i2c_client,
+			address_for_mipi_test, &temp,
+			 s_ctrl->msm_sensor_reg_default_data_type);
+	if (rc < 0) {
+		pr_err("%s: %s: i2c read 0x%x failed\n", __func__,
+			s_ctrl->sensordata->sensor_name,temp);
+		return rc;
+	}
+	*val=temp;
+	pr_err("the value of 0x%llx  is  0x%x \n", address_for_mipi_test,temp);
+	return 0;
+}
+DEFINE_SIMPLE_ATTRIBUTE(sensor_debugfs_value, msm_sensor_debugfs_getvalue,
+			msm_sensor_debugfs_setvalue, " %llx\n");
+
+struct dentry *debugfs_base=NULL;
+int msm_sensor_enable_debugfs(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	struct dentry  *sensor_dir;
+	pr_err("%s this sensor is %s   \n", __func__,s_ctrl->sensordata->sensor_name);
+
+	if (!debugfs_base) {
+		debugfs_base = debugfs_create_dir("msm_sensor", NULL);
+	} 
+	if (!debugfs_base)
+		return -ENOMEM;
+	sensor_dir = debugfs_create_dir
+		(s_ctrl->sensordata->sensor_name, debugfs_base);
+	if (!sensor_dir)
+		return -ENOMEM;
+	if (!debugfs_create_file("test", S_IRUGO | S_IWUSR, sensor_dir,
+			(void *) s_ctrl, &sensor_debugfs_test))
+		return -ENOMEM;
+	if (!debugfs_create_file("address", S_IRUGO | S_IWUSR, sensor_dir,
+			(void *) s_ctrl, &sensor_debugfs_address))
+		return -ENOMEM;
+	if (!debugfs_create_file("value", S_IRUGO | S_IWUSR, sensor_dir,
+			(void *) s_ctrl, &sensor_debugfs_value))
+		return -ENOMEM;
+	return 0;
+}
+
 
 static int32_t msm_sensor_enable_i2c_mux(struct msm_camera_i2c_conf *i2c_conf)
 {
@@ -262,6 +536,8 @@ static int32_t msm_sensor_get_dt_vreg_data(struct device_node *of_node,
 	uint32_t count = 0;
 	uint32_t *vreg_array = NULL;
 
+	if(!of_property_read_bool(of_node, "qcom,cam-vreg-name" ))
+		return 0;
 	count = of_property_count_strings(of_node, "qcom,cam-vreg-name");
 	CDBG("%s qcom,cam-vreg-name count %d\n", __func__, count);
 
@@ -566,7 +842,7 @@ int32_t msm_sensor_init_gpio_pin_tbl(struct device_node *of_node,
 		}
 		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_STANDBY] =
 			gpio_array[val];
-		CDBG("%s qcom,gpio-reset %d\n", __func__,
+		CDBG("%s qcom,gpio-standby %d\n", __func__,
 			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_STANDBY]);
 	}
 
@@ -724,7 +1000,14 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 		pr_err("%s failed %d\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
-
+/*
+  * camera sensor module compatile
+  *
+  * by ZTE_YCM_20140509 yi.changming
+  */
+// --->	
+	sensordata->module_name= NULL;
+// <---	
 	rc = of_property_read_string(of_node, "qcom,sensor-name",
 		&sensordata->sensor_name);
 	CDBG("%s qcom,sensor-name %s, rc %d\n", __func__,
@@ -866,7 +1149,6 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 		&sensordata->misc_regulator);
 	CDBG("%s qcom,misc_regulator %s, rc %d\n", __func__,
 		 sensordata->misc_regulator, ret);
-
 	kfree(gpio_array);
 
 	return rc;
@@ -980,7 +1262,13 @@ int32_t msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 			data->gpio_conf->cam_gpiomux_conf_tbl,
 			data->gpio_conf->cam_gpiomux_conf_tbl_size);
 	}
-
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+#ifndef CONFIG_ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
 	rc = msm_camera_request_gpio_table(
 		data->gpio_conf->cam_gpio_req_tbl,
 		data->gpio_conf->cam_gpio_req_tbl_size, 1);
@@ -988,6 +1276,8 @@ int32_t msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 		pr_err("%s: request gpio failed\n", __func__);
 		return rc;
 	}
+#endif
+// <---
 	for (index = 0; index < power_setting_array->size; index++) {
 		CDBG("%s index %d\n", __func__, index);
 		power_setting = &power_setting_array->power_setting[index];
@@ -1083,6 +1373,27 @@ int32_t msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 				goto power_up_failed;
 			}
 		} else {
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+#ifdef CONFIG_ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
+			registed_sensor[s_ctrl->sensordata->sensor_init_params->position] = 1;
+			if(s_ctrl->sensor_init_reg){
+				rc = s_ctrl->sensor_init_reg(s_ctrl);
+				if (rc < 0) {
+					pr_err("%s:%d init sensor failed rc %d\n", __func__, __LINE__, rc);
+					goto power_up_failed;
+				}
+			}
+			if (s_ctrl->sensor_power_on){
+		 		s_ctrl->func_tbl->sensor_power_up = s_ctrl->sensor_power_on;
+				s_ctrl->func_tbl->sensor_power_down = s_ctrl->sensor_power_down;
+			}
+#endif
+// <---
 			break;
 		}
 	}
@@ -1135,9 +1446,18 @@ power_up_failed:
 				(power_setting->delay * 1000) + 1000);
 		}
 	}
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+#ifndef CONFIG_ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
 	msm_camera_request_gpio_table(
 		data->gpio_conf->cam_gpio_req_tbl,
 		data->gpio_conf->cam_gpio_req_tbl_size, 0);
+#endif
+// <---
 	return rc;
 }
 
@@ -1209,9 +1529,18 @@ int32_t msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 				(power_setting->delay * 1000) + 1000);
 		}
 	}
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+#ifndef CONFIG_ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
 	msm_camera_request_gpio_table(
 		data->gpio_conf->cam_gpio_req_tbl,
 		data->gpio_conf->cam_gpio_req_tbl_size, 0);
+#endif
+// <---
 	CDBG("%s exit\n", __func__);
 	return 0;
 }
@@ -1317,7 +1646,23 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 		for (i = 0; i < SUB_MODULE_MAX; i++)
 			CDBG("%s:%d subdev_id[%d] %d\n", __func__, __LINE__, i,
 				cdata->cfg.sensor_info.subdev_id[i]);
-
+/*
+  * camera sensor module compatile
+  *
+  * by ZTE_YCM_20140509 yi.changming
+  */
+// --->
+		if(s_ctrl->sensordata->module_name){
+			memcpy(cdata->cfg.sensor_info.module_name,
+				s_ctrl->sensordata->module_name,
+				sizeof(cdata->cfg.sensor_info.module_name));
+		}
+		if(s_ctrl->sensordata->default_module_name){
+			memcpy(cdata->cfg.sensor_info.default_module_name,
+				s_ctrl->sensordata->default_module_name,
+				sizeof(cdata->cfg.sensor_info.default_module_name));
+		}
+// <---
 		break;
 	case CFG_GET_SENSOR_INIT_PARAMS:
 		cdata->cfg.sensor_init_params =
@@ -1649,7 +1994,37 @@ int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
 			rc = -EFAULT;
 		}
 		break;
-
+	//Added by weilanying 20131023 begin
+	case CFG_OTP_PARAMS:
+		CDBG("%s calling otp params\n", __func__);
+		if (s_ctrl->sensor_otp_func)
+			 s_ctrl->sensor_otp_func(s_ctrl);
+		break;
+	case CFG_MODULE_INFOR_PARAMS:
+		CDBG("%s calling module infor params\n", __func__);
+		memcpy(cdata->cfg.sensor_info.sensor_name,
+			s_ctrl->sensordata->sensor_name,
+			sizeof(cdata->cfg.sensor_info.sensor_name));
+/*
+  * camera sensor module compatile
+  *
+  * by ZTE_YCM_20140509 yi.changming
+  */
+// --->
+#if 0
+		memcpy(cdata->cfg.sensor_info.module_name,
+			s_ctrl->module_name,
+			sizeof(cdata->cfg.sensor_info.module_name));
+#else
+		memcpy(cdata->cfg.sensor_info.module_name,
+			s_ctrl->sensordata->module_name,
+			sizeof(cdata->cfg.sensor_info.module_name));
+#endif
+// <---
+		CDBG("%s sensor_name=%s,module_name=%s\n", __func__,
+			cdata->cfg.sensor_info.sensor_name,cdata->cfg.sensor_info.module_name);
+		break;
+	//Added by weilanying 20131023 end
 	case CFG_POWER_DOWN:
 		kfree(s_ctrl->stop_setting.reg_setting);
 		s_ctrl->stop_setting.reg_setting = NULL;
@@ -1819,6 +2194,17 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev, void *data)
 			pr_err("%s failed line %d\n", __func__, __LINE__);
 			return rc;
 		}
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+#ifdef CONFIG_ZTE_CAMERA_SENSOR_STANDBY_POWER_CONTROL
+		if(registed_sensor[s_ctrl->sensordata->sensor_init_params->position])
+			return -EINVAL;
+#endif
+// <---
 	}
 	s_ctrl->sensor_device_type = MSM_CAMERA_PLATFORM_DEVICE;
 	s_ctrl->sensor_i2c_client->cci_client = kzalloc(sizeof(
@@ -1886,6 +2272,17 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev, void *data)
 	s_ctrl->msm_sd.close_seq = MSM_SD_CLOSE_2ND_CATEGORY | 0x3;
 	msm_sd_register(&s_ctrl->msm_sd);
 	CDBG("%s:%d\n", __func__, __LINE__);
+	
+	if (s_ctrl->load_otp_parm)
+			 s_ctrl->load_otp_parm(s_ctrl);
+/*
+* add by wuxiaoliang from 8930 for mipi test interface
+*/
+	msm_sensor_enable_debugfs(s_ctrl);
+
+#if defined(CONFIG_MSM_CAMERA_EMODE) 
+	(void)msm_sensor_register_sysdev(s_ctrl);
+#endif /* CONFIG_MSM_CAMERA_EMODE */
 
 	s_ctrl->func_tbl->sensor_power_down(s_ctrl);
 	CDBG("%s:%d\n", __func__, __LINE__);

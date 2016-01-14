@@ -267,8 +267,14 @@ static struct pil_reset_ops pil_pronto_ops_trusted = {
 
 static int pronto_start(const struct subsys_desc *desc)
 {
+	int ret;
 	struct pronto_data *drv = subsys_to_drv(desc);
-	return pil_boot(&drv->desc);
+	//return pil_boot(&drv->desc);
+	ret = pil_boot(&drv->desc);
+	if (ret)
+		wcnss_pronto_log_debug_regs();
+	pr_info("wcnss pil boot ret = %d\n", ret);
+	return ret;
 }
 
 static void pronto_stop(const struct subsys_desc *desc)

@@ -52,6 +52,8 @@
 #define AC3_OUTPUT_FRAME_SZ		1536
 #define EAC3_OUTPUT_FRAME_SZ		1536
 #define DSP_NUM_OUTPUT_FRAME_BUFFERED	2
+/* decoder parameter length */
+#define DDP_DEC_MAX_NUM_PARAM	18
 
 /* decoder parameter length */
 #define DDP_DEC_MAX_NUM_PARAM		18
@@ -204,7 +206,7 @@ static int msm_compr_set_volume(struct snd_compr_stream *cstream,
 
 	return rc;
 }
-
+ 
 static int msm_compr_send_ddp_cfg(struct audio_client *ac,
 				  struct snd_dec_ddp *ddp)
 {

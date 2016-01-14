@@ -214,6 +214,7 @@ int __init cma_fdt_scan(unsigned long node, const char *uname,
 	unsigned long len;
 	__be32 *prop;
 	char *name;
+	phys_addr_t limit = *(phys_addr_t*)data;
 
 	if (!of_get_flat_dt_prop(node, "linux,contiguous-region", NULL))
 		return 0;
@@ -229,7 +230,8 @@ int __init cma_fdt_scan(unsigned long node, const char *uname,
 
 	pr_info("Found %s, memory base %lx, size %ld MiB\n", uname,
 		(unsigned long)base, (unsigned long)size / SZ_1M);
-	dma_contiguous_reserve_area(size, &base, MEMBLOCK_ALLOC_ANYWHERE, name);
+	//dma_contiguous_reserve_area(size, &base, MEMBLOCK_ALLOC_ANYWHERE, name);
+	dma_contiguous_reserve_area(size, &base, limit, name);
 
 	return 0;
 }
@@ -275,7 +277,7 @@ void __init dma_contiguous_reserve(phys_addr_t limit)
 			dma_contiguous_def_base = base;
 	}
 #ifdef CONFIG_OF
-	of_scan_flat_dt(cma_fdt_scan, NULL);
+	of_scan_flat_dt(cma_fdt_scan, (void*)&limit);
 #endif
 };
 

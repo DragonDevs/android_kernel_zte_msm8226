@@ -10,6 +10,10 @@
  * GNU General Public License for more details.
  *
  */
+ /*===========================================================================
+ when         who        what, where, why                         comment tag
+ 2010-12-15   ruijiagui  Add ZTE_FEATURE_SD_DUMP feature          ZTE_RJG_RIL_20121214
+ ===========================================================================*/
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -38,6 +42,12 @@
 #include "timer.h"
 #include "wdog_debug.h"
 
+//ZTE_RJG_RIL_20121214 begin
+#include <mach/boot_shared_imem_cookie.h>
+//ZTE_RJG_RIL_20121214 end
+/*Use Qualcomm's usb vid and pid if enters download due to panic,5.1of5*/
+#include <mach/diag_dload.h>
+
 #define WDT0_RST	0x38
 #define WDT0_EN		0x40
 #define WDT0_BARK_TIME	0x4C
@@ -51,6 +61,7 @@
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
 #define EMERGENCY_DLOAD_MAGIC3    0x77777777
+#define SDDUMP_MAGIC_NUM          0x20121221
 
 #define SCM_IO_DISABLE_PMIC_ARBITER	1
 
@@ -61,6 +72,7 @@
 #endif
 
 static int restart_mode;
+static int ignore_sd_dump = 0;
 void *restart_reason;
 
 int pmic_reset_irq;
@@ -75,12 +87,26 @@ static void *emergency_dload_mode_addr;
 /* Download mode master kill-switch */
 static int dload_set(const char *val, struct kernel_param *kp);
 static int download_mode = 1;
+
+
+static int dload_ignor_sd_dump_set(const char *val, struct kernel_param *kp);
+
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
+
+
+module_param_call(ignore_sd_dump, dload_ignor_sd_dump_set, param_get_int,
+			&ignore_sd_dump, 0644);
+
+
+
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
 	in_panic = 1;
+	/*Use Qualcomm's usb vid and pid if enters download due to panic,5.2of5*/
+	use_qualcomm_usb_product_id();
+	/*end*/
 	return NOTIFY_DONE;
 }
 
@@ -94,6 +120,12 @@ static void set_dload_mode(int on)
 		__raw_writel(on ? 0xE47B337D : 0, dload_mode_addr);
 		__raw_writel(on ? 0xCE14091A : 0,
 		       dload_mode_addr + sizeof(unsigned int));
+        //ZTE_RJG_RIL_20121214 begin
+        //Add flag for sd dump
+        __raw_writel((on && !ignore_sd_dump) ? SDDUMP_MAGIC_NUM : 0,
+		       &(((struct boot_shared_imem_cookie_type *)dload_mode_addr)->err_fatal_magic));
+
+        //ZTE_RJG_RIL_20121214 end
 		mb();
 		dload_mode_enabled = on;
 	}
@@ -143,6 +175,32 @@ static int dload_set(const char *val, struct kernel_param *kp)
 
 	return 0;
 }
+
+
+static int dload_ignor_sd_dump_set(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	int old_val = ignore_sd_dump;
+    pr_err("dload_ignor_sd_dump_set old ignore_sd_dump %d\n", ignore_sd_dump);
+
+	ret = param_set_int(val, kp);
+    pr_err("dload_ignor_sd_dump_set new ignore_sd_dump %d\n", ignore_sd_dump);
+
+	if (ret)
+		return ret;
+
+	/* If ignor_sd_dump is not zero or one, ignore. */
+	if (ignore_sd_dump >> 1) {
+		ignore_sd_dump = old_val;
+		return -EINVAL;
+	}
+
+    set_dload_mode(download_mode);
+	return 0;
+}
+
+
+
 #else
 #define set_dload_mode(x) do {} while (0)
 
@@ -163,6 +221,13 @@ void msm_set_restart_mode(int mode)
 }
 EXPORT_SYMBOL(msm_set_restart_mode);
 
+//ZTE_RIL_RJG_20130709 begin
+void msm_ignore_sd_dump(int enable)
+{
+	ignore_sd_dump = !!enable;
+}
+EXPORT_SYMBOL(msm_ignore_sd_dump);
+//ZTE_RIL_RJG_20130709 end
 static bool scm_pmic_arbiter_disable_supported;
 /*
  * Force the SPMI PMIC arbiter to shutdown so that no more SPMI transactions
@@ -203,6 +268,17 @@ static void __msm_power_off(int lower_pshold)
 
 static void msm_power_off(void)
 {
+	/*ZTE add for battery switch function*/
+	{
+		extern int battery_switch_enable(void);
+		int ret = battery_switch_enable();
+		if (ret!=0)
+			pr_info("battery switch not enable\n");
+		else
+			pr_info("battery switch enable\n");
+		
+	}
+
 	/* MSM initiated power off, lower ps_hold */
 	__msm_power_off(1);
 }
@@ -251,7 +327,7 @@ static irqreturn_t resout_irq_handler(int irq, void *dev_id)
 static void msm_restart_prepare(const char *cmd)
 {
 #ifdef CONFIG_MSM_DLOAD_MODE
-
+	#if 0
 	/* This looks like a normal reboot at this point. */
 	set_dload_mode(0);
 
@@ -265,6 +341,14 @@ static void msm_restart_prepare(const char *cmd)
 	/* Kill download mode if master-kill switch is set */
 	if (!download_mode)
 		set_dload_mode(0);
+	#else
+	if(restart_mode == RESTART_DLOAD)
+		set_dload_mode(1);
+	else if(download_mode)
+		set_dload_mode(in_panic);
+	else
+		set_dload_mode(0);
+	#endif
 #endif
 
 	pm8xxx_reset_pwr_off(1);
@@ -288,6 +372,18 @@ static void msm_restart_prepare(const char *cmd)
 			__raw_writel(0x6f656d00 | code, restart_reason);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
+		} else if (!strncmp(cmd, "disemmcwp", 9)){
+//yeganlin_20131220,add interface to enable/disable emmc write protct function
+			__raw_writel(0x776655aa, restart_reason);
+		} else if (!strncmp(cmd, "emmcwpenab", 10)){
+			__raw_writel(0x776655bb, restart_reason);
+		} else if (!strncmp(cmd, "ftmmode", 7)) {
+			/*ZTE_BOOT_20140114,support:adb reboot ftmmode*/
+			__raw_writel(0x776655ee, restart_reason);
+#ifdef CONFIG_ZTE_PIL_AUTH_ERROR_DETECTION
+		} else if (!strncmp(cmd, "unauth", 6)){
+			__raw_writel(0x776655cc, restart_reason);
+#endif
 		} else {
 			__raw_writel(0x77665501, restart_reason);
 		}

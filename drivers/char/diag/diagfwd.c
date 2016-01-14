@@ -43,6 +43,7 @@
 #include "diag_masks.h"
 #include "diagfwd_bridge.h"
 
+void msm_ignore_sd_dump(int enable);
 #define MODE_CMD		41
 #define RESET_ID		2
 
@@ -1599,6 +1600,9 @@ int diag_process_apps_pkt(unsigned char *buf, int len)
 		msleep(5000);
 		/* call download API */
 		msm_set_restart_mode(RESTART_DLOAD);
+        //ZTE_RIL_RJG_20130709 begin
+		msm_ignore_sd_dump(1); //ensure that do not enter into sd dump
+        //ZTE_RIL_RJG_20130709 end
 		printk(KERN_CRIT "diag: download mode set, Rebooting SoC..\n");
 		kernel_restart(NULL);
 		/* Not required, represents that command isnt sent to modem */
@@ -2480,7 +2484,9 @@ void diagfwd_init(void)
 	driver->buf_tbl_size = (buf_tbl_size < driver->poolsize_hdlc) ?
 				driver->poolsize_hdlc : buf_tbl_size;
 	driver->supports_separate_cmdrsp = device_supports_separate_cmdrsp();
-	driver->supports_apps_hdlc_encoding = 1;
+	//driver->supports_apps_hdlc_encoding = 1;
+	//Mark by ruijiagui, for sdlog can not support hdlc encoding
+	driver->supports_apps_hdlc_encoding = 0;
 	mutex_init(&driver->diag_hdlc_mutex);
 	mutex_init(&driver->diag_cntl_mutex);
 

@@ -58,6 +58,11 @@ struct check {
 	struct check **prereq;
 };
 
+/*
+ * Raise warning level to error level
+ * by ZTE_JIA_20140120 jia.jia
+ */
+#if 0
 #define CHECK_ENTRY(nm, tfn, nfn, pfn, d, w, e, ...)	       \
 	static struct check *nm##_prereqs[] = { __VA_ARGS__ }; \
 	static struct check nm = { \
@@ -72,6 +77,23 @@ struct check {
 		.num_prereqs = ARRAY_SIZE(nm##_prereqs), \
 		.prereq = nm##_prereqs, \
 	};
+#else
+#define CHECK_ENTRY(nm, tfn, nfn, pfn, d, w, e, ...)	       \
+	static struct check *nm##_prereqs[] = { __VA_ARGS__ }; \
+	static struct check nm = { \
+		.name = #nm, \
+		.tree_fn = (tfn), \
+		.node_fn = (nfn), \
+		.prop_fn = (pfn), \
+		.data = (d), \
+		.warn = false, \
+		.error = true, \
+		.status = UNCHECKED, \
+		.num_prereqs = ARRAY_SIZE(nm##_prereqs), \
+		.prereq = nm##_prereqs, \
+	};
+#endif
+
 #define WARNING(nm, tfn, nfn, pfn, d, ...) \
 	CHECK_ENTRY(nm, tfn, nfn, pfn, d, true, false, __VA_ARGS__)
 #define ERROR(nm, tfn, nfn, pfn, d, ...) \
@@ -187,12 +209,18 @@ out:
  * Utility check functions
  */
 
+/*
+ * Raise warning level to error level
+ * by ZTE_JIA_20140120 jia.jia
+ */
+#if 0
 /* A check which always fails, for testing purposes only */
 static inline void check_always_fail(struct check *c, struct node *dt)
 {
 	FAIL(c, "always_fail check");
 }
 TREE_CHECK(always_fail, NULL);
+#endif
 
 static void check_is_string(struct check *c, struct node *root,
 			    struct node *node)
@@ -669,7 +697,13 @@ static struct check *check_table[] = {
 	&avoid_default_addr_size,
 	&obsolete_chosen_interrupt_controller,
 
+/*
+ * Raise warning level to error level
+ * by ZTE_JIA_20140120 jia.jia
+ */
+#if 0
 	&always_fail,
+#endif
 };
 
 static void enable_warning_error(struct check *c, bool warn, bool error)

@@ -73,6 +73,32 @@ struct msm_sensor_ctrl_t {
 	uint16_t clk_info_size;
 	void *misc_regulator;
 	enum msm_sensor_state_t sensor_state;
+	void (*load_otp_parm) (struct msm_sensor_ctrl_t *);
+	void (*sensor_otp_func) (struct msm_sensor_ctrl_t *);
+/*
+  * camera sensor module compatile
+  *
+  * by ZTE_YCM_20140509 yi.changming
+  */
+// --->
+#if 0
+	char  module_name[32];
+#else
+	const char  *module_name;
+#endif
+// <---
+	/*add by wuxiaoliang for mipi test interface*/
+	enum msm_camera_i2c_data_type msm_sensor_reg_default_data_type;
+/*
+  * modfiy code  for platform standby mode
+  *
+  * by ZTE_YCM_20140506 yi.changming
+  */
+// --->
+	int32_t (*sensor_power_down) (struct msm_sensor_ctrl_t *);
+	int32_t (*sensor_power_on) (struct msm_sensor_ctrl_t *);
+	int32_t (*sensor_init_reg) (struct msm_sensor_ctrl_t *);
+// <---
 };
 
 int32_t msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl,
@@ -103,4 +129,9 @@ int32_t msm_sensor_get_dt_gpio_set_tbl(struct device_node *of_node,
 int32_t msm_sensor_init_gpio_pin_tbl(struct device_node *of_node,
 	struct msm_camera_gpio_conf *gconf, uint16_t *gpio_array,
 	uint16_t gpio_array_size);
+
+/*
+* add by wuxiaoliang from 8930 for mipi test interface
+*/
+int32_t msm_sensor_enable_debugfs(struct msm_sensor_ctrl_t *s_ctrl);
 #endif
