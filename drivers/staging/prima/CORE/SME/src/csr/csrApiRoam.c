@@ -142,6 +142,9 @@ int diagAuthTypeFromCSRType(eCsrAuthType authType)
         n = AUTH_WPA_PSK;
         break;
     case eCSR_AUTH_TYPE_RSN:
+#ifdef WLAN_FEATURE_11W
+    case eCSR_AUTH_TYPE_RSN_8021X_SHA256:
+#endif
         n = AUTH_WPA2_EAP;
         break;
     case eCSR_AUTH_TYPE_RSN_PSK:
@@ -366,10 +369,9 @@ eHalStatus csrOpen(tpAniSirGlobal pMac)
         status = csrInitGetChannels( pMac );
 #endif
     }while(0);
-
+    
     return (status);
 }
-
 /* --------------------------------------------------------------------------
     \fn csrInitChannels
     \brief This function must be called to initialize CSR channel lists
@@ -380,7 +382,7 @@ eHalStatus csrInitChannels(tpAniSirGlobal pMac)
     eHalStatus status = eHAL_STATUS_SUCCESS;
     static uNvTables nvTables;
     VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
-    v_REGDOMAIN_t regId = REGDOMAIN_WORLD;
+    v_REGDOMAIN_t regId;
 
     vosStatus = vos_nv_readDefaultCountryTable( &nvTables );
     if ( VOS_IS_STATUS_SUCCESS(vosStatus) )
@@ -399,38 +401,24 @@ eHalStatus csrInitChannels(tpAniSirGlobal pMac)
     }
     smsLog( pMac, LOG1, FL(" country Code from nvRam %.2s"), pMac->scan.countryCodeDefault );
 
-    WDA_SetRegDomain(pMac, regId, eSIR_TRUE);
-    pMac->scan.domainIdDefault = regId;
-    pMac->scan.domainIdCurrent = pMac->scan.domainIdDefault;
-    vos_mem_copy(pMac->scan.countryCodeCurrent, pMac->scan.countryCodeDefault,
-                 WNI_CFG_COUNTRY_CODE_LEN);
-    status = csrInitGetChannels( pMac );
-
-    return status;
-}
-
-eHalStatus csrInitChannelsForCC(tpAniSirGlobal pMac)
-{
-    eHalStatus status = eHAL_STATUS_SUCCESS;
-    v_REGDOMAIN_t regId = REGDOMAIN_WORLD;
-
     if (!('0' == pMac->scan.countryCodeDefault[0] &&
         '0' == pMac->scan.countryCodeDefault[1]))
     {
         csrGetRegulatoryDomainForCountry(pMac, pMac->scan.countryCodeDefault,
-                                           &regId, COUNTRY_NV);
-
+                                         &regId, COUNTRY_NV);
     }
     else
     {
-        return status;
+        regId = REGDOMAIN_WORLD;
     }
+
     WDA_SetRegDomain(pMac, regId, eSIR_TRUE);
     pMac->scan.domainIdDefault = regId;
     pMac->scan.domainIdCurrent = pMac->scan.domainIdDefault;
     vos_mem_copy(pMac->scan.countryCodeCurrent, pMac->scan.countryCodeDefault,
                  WNI_CFG_COUNTRY_CODE_LEN);
     status = csrInitGetChannels( pMac );
+
     return status;
 }
 
@@ -1825,7 +1813,6 @@ eHalStatus csrChangeDefaultConfigParam(tpAniSirGlobal pMac, tCsrConfigParam *pPa
 
         pMac->roam.configParam.isAmsduSupportInAMPDU = pParam->isAmsduSupportInAMPDU;
         pMac->roam.configParam.nSelect5GHzMargin = pParam->nSelect5GHzMargin;
-        pMac->roam.configParam.sendDeauthBeforeCon = pParam->sendDeauthBeforeCon;
     }
     
     return status;
@@ -1953,7 +1940,6 @@ eHalStatus csrGetConfigParam(tpAniSirGlobal pMac, tCsrConfigParam *pParam)
         pParam->isAmsduSupportInAMPDU = pMac->roam.configParam.isAmsduSupportInAMPDU;
         pParam->nSelect5GHzMargin = pMac->roam.configParam.nSelect5GHzMargin;
 
-        pParam->sendDeauthBeforeCon = pMac->roam.configParam.sendDeauthBeforeCon;
         csrSetChannels(pMac, pParam);
 
         status = eHAL_STATUS_SUCCESS;
@@ -4806,7 +4792,8 @@ static eHalStatus csrRoamSaveSecurityRspIE(tpAniSirGlobal pMac, tANI_U32 session
 #endif /* FEATURE_WLAN_WAPI */
 #ifdef WLAN_FEATURE_11W
       ||
-       (eCSR_AUTH_TYPE_RSN_PSK_SHA256 == authType)
+       (eCSR_AUTH_TYPE_RSN_PSK_SHA256 == authType) ||
+       (eCSR_AUTH_TYPE_RSN_8021X_SHA256 == authType)
 #endif /* FEATURE_WLAN_WAPI */
         )
     {
@@ -4825,6 +4812,7 @@ static eHalStatus csrRoamSaveSecurityRspIE(tpAniSirGlobal pMac, tANI_U32 session
 #endif /* WLAN_FEATURE_VOWIFI_11R */
 #if defined WLAN_FEATURE_11W
                 (eCSR_AUTH_TYPE_RSN_PSK_SHA256 == authType) ||
+                (eCSR_AUTH_TYPE_RSN_8021X_SHA256 == authType) ||
 #endif
                 (eCSR_AUTH_TYPE_RSN_PSK == authType))
             {
@@ -6003,19 +5991,15 @@ eHalStatus csrRoamCopyProfile(tpAniSirGlobal pMac, tCsrRoamProfile *pDstProfile,
 #endif /* FEATURE_WLAN_WAPI */
         if(pSrcProfile->nAddIEScanLength)
         {
-            memset(pDstProfile->addIEScan, 0 , SIR_MAC_MAX_IE_LENGTH);
-            if ( SIR_MAC_MAX_IE_LENGTH >=  pSrcProfile->nAddIEScanLength)
+            status = palAllocateMemory(pMac->hHdd,
+                     (void **)&pDstProfile->pAddIEScan, pSrcProfile->nAddIEScanLength);
+            if(!HAL_STATUS_SUCCESS(status))
             {
-                vos_mem_copy(pDstProfile->addIEScan, pSrcProfile->addIEScan,
-                          pSrcProfile->nAddIEScanLength);
-                pDstProfile->nAddIEScanLength = pSrcProfile->nAddIEScanLength;
+                break;
             }
-            else
-            {
-                VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
-                      FL(" AddIEScanLength is not valid %u"),
-                                  pSrcProfile->nAddIEScanLength);
-            }
+            pDstProfile->nAddIEScanLength = pSrcProfile->nAddIEScanLength;
+            palCopyMemory(pMac->hHdd, pDstProfile->pAddIEScan, pSrcProfile->pAddIEScan,
+                pSrcProfile->nAddIEScanLength);
         }
         if(pSrcProfile->nAddIEAssocLength)
         {
@@ -6778,35 +6762,6 @@ eHalStatus csrRoamProcessDisassocDeauth( tpAniSirGlobal pMac, tSmeCmd *pCommand,
         {
             NewSubstate = eCSR_ROAM_SUBSTATE_DISASSOC_HANDOFF;
         }
-        else
-        {
-            // If we are in neighbor preauth done state then on receiving
-            // disassoc or deauth we dont roam instead we just disassoc
-            // from current ap and then go to disconnected state
-            // This happens for ESE and 11r FT connections ONLY.
-#ifdef WLAN_FEATURE_VOWIFI_11R
-            if (csrRoamIs11rAssoc(pMac) &&
-                                      (csrNeighborRoamStatePreauthDone(pMac)))
-            {
-                csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
-            }
-#endif
-#ifdef FEATURE_WLAN_ESE
-            if (csrRoamIsESEAssoc(pMac) &&
-                                      (csrNeighborRoamStatePreauthDone(pMac)))
-            {
-                csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
-            }
-#endif
-#ifdef FEATURE_WLAN_LFR
-            if (csrRoamIsFastRoamEnabled(pMac, sessionId) &&
-                                      (csrNeighborRoamStatePreauthDone(pMac)))
-            {
-                csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
-            }
-#endif
-        }
-
         if( fDisassoc )
         {
             status = csrRoamIssueDisassociate( pMac, sessionId, NewSubstate, fMICFailure );
@@ -8195,7 +8150,7 @@ void csrRoamJoinedStateMsgProcessor( tpAniSirGlobal pMac, void *pMsgBuf )
           break;
         case eWNI_SME_UPPER_LAYER_ASSOC_CNF:
         {
-            tCsrRoamSession  *pSession;
+            tCsrRoamSession  *pSession = NULL;
             tSirSmeAssocIndToUpperLayerCnf *pUpperLayerAssocCnf;
             tCsrRoamInfo roamInfo;
             tCsrRoamInfo *pRoamInfo = NULL;
@@ -8206,7 +8161,8 @@ void csrRoamJoinedStateMsgProcessor( tpAniSirGlobal pMac, void *pMsgBuf )
             pRoamInfo = &roamInfo;
             pUpperLayerAssocCnf = (tSirSmeAssocIndToUpperLayerCnf *)pMsgBuf;
             status = csrRoamGetSessionIdFromBSSID( pMac, (tCsrBssid *)pUpperLayerAssocCnf->bssId, &sessionId );
-            pSession = CSR_GET_SESSION(pMac, sessionId);
+            if (HAL_STATUS_SUCCESS(status))
+                pSession = CSR_GET_SESSION(pMac, sessionId);
 
             if(!pSession)
             {
@@ -9081,6 +9037,7 @@ void csrRoamCheckForLinkStatusChange( tpAniSirGlobal pMac, tSirSmeRsp *pSirMsg )
     tCsrRoamSession *pSession = NULL;
     tpSirSmeSwitchChannelInd pSwitchChnInd;
     tSmeMaxAssocInd *pSmeMaxAssocInd;
+    tSmeCmd pCommand;
     pSirMsg->messageType = (pSirMsg->messageType);
     pSirMsg->length = (pSirMsg->length);
     pSirMsg->statusCode = (pSirMsg->statusCode);
@@ -9162,106 +9119,87 @@ void csrRoamCheckForLinkStatusChange( tpAniSirGlobal pMac, tSirSmeRsp *pSirMsg )
             }
             break;
         case eWNI_SME_DISASSOC_IND:
+            // Check if AP dis-associated us because of MIC failure. If so,
+            // then we need to take action immediately and not wait till the
+            // the WmStatusChange requests is pushed and processed
+            pDisassocInd = (tSirSmeDisassocInd *)pSirMsg;
+            status = csrRoamGetSessionIdFromBSSID( pMac, (tCsrBssid *)pDisassocInd->bssId, &sessionId );
+            if( HAL_STATUS_SUCCESS( status ) )
             {
-                // Check if AP dis-associated us because of MIC failure. If so,
-                // then we need to take action immediately and not wait till the
-                // the WmStatusChange requests is pushed and processed
-                tSmeCmd *pCommand;
-
-                pDisassocInd = (tSirSmeDisassocInd *)pSirMsg;
-                status = csrRoamGetSessionIdFromBSSID( pMac,
-                                   (tCsrBssid *)pDisassocInd->bssId, &sessionId );
-                if( HAL_STATUS_SUCCESS( status ) )
-                {
-                    smsLog( pMac, LOGE, FL("DISASSOCIATION Indication from MAC"
-                                       " for session %d "), sessionId);
-                    smsLog( pMac, LOGE, FL("DISASSOCIATION from peer ="
-                                      MAC_ADDRESS_STR " "
-                                      " reason = %d status = %d "),
-                                     MAC_ADDR_ARRAY(pDisassocInd->peerMacAddr),
-                                     pDisassocInd->reasonCode,
-                                     pDisassocInd->statusCode);
-                    // If we are in neighbor preauth done state then on receiving
-                    // disassoc or deauth we dont roam instead we just disassoc
-                    // from current ap and then go to disconnected state
-                    // This happens for CCX and 11r FT connections ONLY.
+                smsLog( pMac, LOGE, FL("DISASSOCIATION Indication from MAC for session %d "), sessionId);
+                smsLog( pMac, LOGE, FL("DISASSOCIATION from peer =" MAC_ADDRESS_STR " "
+                                       " reason = %d status = %d "),
+                                       MAC_ADDR_ARRAY(pDisassocInd->peerMacAddr),
+                                       pDisassocInd->reasonCode, pDisassocInd->statusCode);
+                // If we are in neighbor preauth done state then on receiving
+                // disassoc or deauth we dont roam instead we just disassoc
+                // from current ap and then go to disconnected state 
+                // This happens for CCX and 11r FT connections ONLY.
 #ifdef WLAN_FEATURE_VOWIFI_11R
-                    if (csrRoamIs11rAssoc(pMac) && (csrNeighborRoamStatePreauthDone(pMac)))
-                    {
-                        csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
-                    }
+                if (csrRoamIs11rAssoc(pMac) && (csrNeighborRoamStatePreauthDone(pMac)))
+                {
+                    csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
+                }
 #endif
 #ifdef FEATURE_WLAN_CCX
-                    if (csrRoamIsCCXAssoc(pMac) && (csrNeighborRoamStatePreauthDone(pMac)))
-                    {
-                        csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
-                    }
+                if (csrRoamIsCCXAssoc(pMac) && (csrNeighborRoamStatePreauthDone(pMac)))
+                {
+                    csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
+                }
 #endif
 #ifdef FEATURE_WLAN_LFR
-                    if (csrRoamIsFastRoamEnabled(pMac, sessionId) && (csrNeighborRoamStatePreauthDone(pMac)))
-                    {
-                        csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
-                    }
-#endif
-                    pSession = CSR_GET_SESSION( pMac, sessionId );
-
-                    if (!pSession)
-                    {
-                        smsLog(pMac, LOGE, FL("  session %d not found "), sessionId);
-                        return;
-                    }
-
-                    if ( csrIsConnStateInfra( pMac, sessionId ) )
-                    {
-                        pSession->connectState = eCSR_ASSOC_STATE_TYPE_NOT_CONNECTED;
-                    }
-#ifndef WLAN_MDM_CODE_REDUCTION_OPT
-                    sme_QosCsrEventInd(pMac, (v_U8_t)sessionId, SME_QOS_CSR_DISCONNECT_IND, NULL);
-#endif
-                    csrRoamLinkDown(pMac, sessionId);
-                    csrRoamIssueWmStatusChange( pMac, sessionId, eCsrDisassociated, pSirMsg );
-                    if (CSR_IS_INFRA_AP(&pSession->connectedProfile))
-                    {
-
-                        pCommand = csrGetCommandBuffer(pMac);
-                        if (NULL == pCommand)
-                        {
-                            smsLog( pMac, LOGE, FL(" fail to get command buffer") );
-                            status = eHAL_STATUS_RESOURCES;
-                        }
-                        pRoamInfo = &roamInfo;
-                        pRoamInfo->statusCode = pDisassocInd->statusCode;
-                        pRoamInfo->u.pConnectedProfile = &pSession->connectedProfile;
-                        pRoamInfo->staId = (tANI_U8)pDisassocInd->staId;
-
-                        vos_mem_copy(pRoamInfo->peerMac, pDisassocInd->peerMacAddr,
-                                     sizeof(tSirMacAddr));
-                        vos_mem_copy(&pRoamInfo->bssid, pDisassocInd->bssId,
-                                     sizeof(tCsrBssid));
-
-                        status = csrRoamCallCallback(pMac, sessionId, pRoamInfo, 0,
-                                        eCSR_ROAM_INFRA_IND, eCSR_ROAM_RESULT_DISASSOC_IND);
-
-                        /*
-                         *  STA/P2P client got  disassociated so remove any pending deauth
-                         *  commands in sme pending list
-                         */
-                        pCommand->command = eSmeCommandRoam;
-                        pCommand->sessionId = (tANI_U8)sessionId;
-                        pCommand->u.roamCmd.roamReason = eCsrForcedDeauthSta;
-                        vos_mem_copy(pCommand->u.roamCmd.peerMac,
-                                     pDisassocInd->peerMacAddr,
-                                     sizeof(tSirMacAddr));
-                        csrRoamRemoveDuplicateCommand(pMac, sessionId, pCommand, eCsrForcedDeauthSta);
-                        csrReleaseCommand( pMac, pCommand );
-
-                    }
-                }
-                else
+                if (csrRoamIsFastRoamEnabled(pMac, sessionId) && (csrNeighborRoamStatePreauthDone(pMac)))
                 {
-                    smsLog(pMac, LOGE, FL(" Session Id not found for BSSID " MAC_ADDRESS_STR),
-                                            MAC_ADDR_ARRAY(pDisassocInd->bssId));
+                    csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
                 }
+#endif
+                pSession = CSR_GET_SESSION( pMac, sessionId );
+
+                if(!pSession)
+                {
+                    smsLog(pMac, LOGE, FL("  session %d not found "), sessionId);
+                    return;
+                }
+
+                if ( csrIsConnStateInfra( pMac, sessionId ) )
+                {
+                    pSession->connectState = eCSR_ASSOC_STATE_TYPE_NOT_CONNECTED;
+                }
+#ifndef WLAN_MDM_CODE_REDUCTION_OPT
+                sme_QosCsrEventInd(pMac, (v_U8_t)sessionId, SME_QOS_CSR_DISCONNECT_IND, NULL);
+#endif
+                csrRoamLinkDown(pMac, sessionId);
+                csrRoamIssueWmStatusChange( pMac, sessionId, eCsrDisassociated, pSirMsg );
+                if(CSR_IS_INFRA_AP(&pSession->connectedProfile))
+                {
+
+                    pRoamInfo = &roamInfo;
+
+                    pRoamInfo->statusCode = pDisassocInd->statusCode; 
+                    pRoamInfo->u.pConnectedProfile = &pSession->connectedProfile;
+
+                    pRoamInfo->staId = (tANI_U8)pDisassocInd->staId;
+
+                    palCopyMemory(pMac->hHdd, pRoamInfo->peerMac, pDisassocInd->peerMacAddr, sizeof(tSirMacAddr));
+                    palCopyMemory(pMac->hHdd, &pRoamInfo->bssid, pDisassocInd->bssId, sizeof(tCsrBssid));
+
+                    status = csrRoamCallCallback(pMac, sessionId, pRoamInfo, 0, eCSR_ROAM_INFRA_IND, eCSR_ROAM_RESULT_DISASSOC_IND);
+
+                    /*
+                    *  STA/P2P client got  disassociated so remove any pending deauth 
+                    *  commands in sme pending list
+                    */
+                    pCommand.command = eSmeCommandRoam;
+                    pCommand.sessionId = (tANI_U8)sessionId;
+                    pCommand.u.roamCmd.roamReason = eCsrForcedDeauthSta;
+                    vos_mem_copy(pCommand.u.roamCmd.peerMac, pDisassocInd->peerMacAddr, sizeof(tSirMacAddr));
+                    csrRoamRemoveDuplicateCommand(pMac, sessionId, &pCommand, eCsrForcedDeauthSta);
+                }
+            }
+            else
+            {
+                smsLog(pMac, LOGE, FL(" Session Id not found for BSSID " MAC_ADDRESS_STR),
+                                        MAC_ADDR_ARRAY(pDisassocInd->bssId));
             }
             break;
         case eWNI_SME_DEAUTH_IND:
@@ -11024,10 +10962,14 @@ tANI_BOOLEAN csrRoamIsValid40MhzChannel(tpAniSirGlobal pMac, tANI_U8 channel)
     {
         if(pIes->HTCaps.present && (eHT_CHANNEL_WIDTH_40MHZ == pIes->HTCaps.supportedChannelWidthSet))
         {
-            // Check set as TKIP or not.
-            if (NULL != &(pIes->RSN.pwise_cipher_suites[0][0]) &&
-               !memcmp( &(pIes->RSN.pwise_cipher_suites[0][0]),
-                                        "\x00\x0f\xac\x02" ,4))
+           // In Case WPA2 and TKIP is the only one cipher suite in Pairwise.
+            if ((pIes->RSN.present && (pIes->RSN.pwise_cipher_suite_count == 1) &&
+                !memcmp(&(pIes->RSN.pwise_cipher_suites[0][0]),
+                               "\x00\x0f\xac\x02",4))
+               //In Case WPA1 and TKIP is the only one cipher suite in Unicast.
+               ||(pIes->WPA.present && (pIes->WPA.unicast_cipher_count == 1) &&
+                 !memcmp(&(pIes->WPA.unicast_ciphers[0][0]),
+                              "\x00\x50\xf2\x02",4)))
             {
                 smsLog(pMac, LOGW, " No channel bonding in TKIP mode ");
                 eRet = PHY_SINGLE_CHANNEL_CENTERED;
@@ -12564,22 +12506,36 @@ eHalStatus csrSendJoinReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSirBssDe
         }
 #endif /* FEATURE_WLAN_CCX */
         // addIEScan
-        if (pProfile->nAddIEScanLength)
+        if(pProfile->nAddIEScanLength && pProfile->pAddIEScan)
         {
             ieLen = pProfile->nAddIEScanLength;
-            memset(pSession->addIEScan, 0 , pSession->nAddIEScanLength);
+            if(ieLen > pSession->nAddIEScanLength)
+            {
+                if(pSession->pAddIEScan && pSession->nAddIEScanLength)
+                {
+                    palFreeMemory(pMac->hHdd, pSession->pAddIEScan);
+                }
+                status = palAllocateMemory(pMac->hHdd,
+                                 (void **)&pSession->pAddIEScan, ieLen);
+                if(!HAL_STATUS_SUCCESS(status)) break;
+            }
             pSession->nAddIEScanLength = ieLen;
-            vos_mem_copy(pSession->addIEScan, pProfile->addIEScan, ieLen);
+            palCopyMemory(pMac->hHdd, pSession->pAddIEScan, 
+                                      pProfile->pAddIEScan, ieLen);
             wTmp = pal_cpu_to_be16( ieLen );
             palCopyMemory( pMac->hHdd, pBuf, &wTmp, sizeof(tANI_U16) );
             pBuf += sizeof(tANI_U16);
-            vos_mem_copy(pBuf, pProfile->addIEScan, ieLen);
+            palCopyMemory( pMac->hHdd, pBuf, pProfile->pAddIEScan, ieLen );
             pBuf += ieLen;
         }
         else
         {
-            memset(pSession->addIEScan, 0, pSession->nAddIEScanLength);
             pSession->nAddIEScanLength = 0;
+            if(pSession->pAddIEScan)
+            {
+                palFreeMemory(pMac->hHdd, pSession->pAddIEScan);
+                pSession->pAddIEScan = NULL;
+            }
             *pBuf = 0;
             *(pBuf + 1) = 0;
             pBuf += 2;
@@ -14138,9 +14094,10 @@ static void csrInitSession( tpAniSirGlobal pMac, tANI_U32 sessionId )
     }
     pSession->nWapiRspIeLength = 0;
 #endif /* FEATURE_WLAN_WAPI */
-    if (pSession->nAddIEScanLength)
+    if(pSession->pAddIEScan)
     {
-       memset(pSession->addIEScan, 0 , SIR_MAC_MAX_IE_LENGTH);
+        palFreeMemory(pMac->hHdd, pSession->pAddIEScan);
+        pSession->pAddIEScan = NULL;
     }
     pSession->nAddIEScanLength = 0;
     if(pSession->pAddIEAssoc)

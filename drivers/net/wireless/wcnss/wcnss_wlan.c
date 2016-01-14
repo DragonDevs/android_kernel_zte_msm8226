@@ -185,6 +185,7 @@ static DEFINE_SPINLOCK(reg_spinlock);
 #define WCNSS_USR_CTRL_MSG_START  0x00000000
 #define WCNSS_USR_SERIAL_NUM      (WCNSS_USR_CTRL_MSG_START + 1)
 #define WCNSS_USR_HAS_CAL_DATA    (WCNSS_USR_CTRL_MSG_START + 2)
+#define WCNSS_USR_WLAN_MAC_ADDR   (WCNSS_USR_CTRL_MSG_START + 3)
 
 #define MAC_ADDRESS_STR "%02x:%02x:%02x:%02x:%02x:%02x"
 
@@ -250,16 +251,6 @@ static struct notifier_block wnb = {
 
 #define NVBIN_FILE "wlan/prima/WCNSS_qcom_wlan_nv.bin"
 
-#define NVBIN_FILE_PERSIST "wlan/prima/WCNSS_qcom_wlan_nv_persist.bin"
-int wlan_use_persist_nv_file = 0;
-EXPORT_SYMBOL(wlan_use_persist_nv_file);
-
-#ifdef WLAN_BIN_COMPATIBLE
-#define NVBIN_FILE_SECOND "wlan/prima/WCNSS_qcom_wlan_nv_2.bin"
-extern uint8_t read_zte_hw_ver_byte(void);
-uint8_t wlan_hw_ver = 0;
-EXPORT_SYMBOL(wlan_hw_ver);
-#endif
 /*
  * On SMD channel 4K of maximum data can be transferred, including message
  * header, so NV fragment size as next multiple of 1Kb is 3Kb.
@@ -1868,25 +1859,6 @@ static void wcnss_send_pm_config(struct work_struct *worker)
 
 static DECLARE_RWSEM(wcnss_pm_sem);
 
-#ifdef WLAN_BIN_COMPATIBLE
-static int wcnss_get_firmware_nv_file(uint8_t vHardwareID, char *pfileName)
-{
-	char *mWlanNVFile = NVBIN_FILE;
-	printk("%s: vHardwareID = %d\n", __func__, vHardwareID);
-
-	if (vHardwareID == 0x01) {
-		mWlanNVFile = NVBIN_FILE;
-	} else if (vHardwareID == 0x02) {
-		mWlanNVFile = NVBIN_FILE_SECOND;
-	} else {
-		mWlanNVFile = NVBIN_FILE;
-	}
-	strcpy(pfileName, mWlanNVFile);
-	printk("%s: pfileName = %s\n", __func__, pfileName);
-	return 0;
-}
-#endif
-
 static void wcnss_nvbin_dnld(void)
 {
 	int ret = 0;
@@ -1901,30 +1873,14 @@ static void wcnss_nvbin_dnld(void)
 	const struct firmware *nv = NULL;
 	struct device *dev = &penv->pdev->dev;
 
-	char mWcnssNVFile[100] = NVBIN_FILE;
-#ifdef WLAN_BIN_COMPATIBLE
-	wlan_hw_ver = read_zte_hw_ver_byte();
-	wcnss_get_firmware_nv_file(wlan_hw_ver, mWcnssNVFile);
-#endif
 	down_read(&wcnss_pm_sem);
 
-	ret = request_firmware(&nv, NVBIN_FILE_PERSIST, dev);
+	ret = request_firmware(&nv, NVBIN_FILE, dev);
 
 	if (ret || !nv || !nv->data || !nv->size) {
 		pr_err("wcnss: %s: request_firmware failed for %s\n",
-			__func__, NVBIN_FILE_PERSIST);
-		ret = request_firmware(&nv, mWcnssNVFile, dev);
-
-		if (ret || !nv || !nv->data || !nv->size) {
-			pr_err("wcnss: %s: request_firmware failed for %s\n",
-				__func__, mWcnssNVFile);
-			goto out;
-		} else {
-			printk("%s, wcnss will use %s\n", __func__, mWcnssNVFile);
-		}
-	} else {
-		printk("%s, wcnss will use %s\n", __func__, NVBIN_FILE_PERSIST);
-		wlan_use_persist_nv_file = 1;
+			__func__, NVBIN_FILE);
+		goto out;
 	}
 
 	/*
@@ -2197,6 +2153,16 @@ void process_usr_ctrl_cmd(u8 *buf, size_t len)
 			pr_err("%s: Invalid data for cal %d\n", __func__,
 				buf[2]);
 		has_calibrated_data = buf[2];
+		break;
+
+	case WCNSS_USR_WLAN_MAC_ADDR:
+		memcpy(&penv->wlan_nv_macAddr,  &buf[2],
+				sizeof(penv->wlan_nv_macAddr));
+
+		pr_debug("%s: MAC Addr:" MAC_ADDRESS_STR "\n", __func__,
+			penv->wlan_nv_macAddr[0], penv->wlan_nv_macAddr[1],
+			penv->wlan_nv_macAddr[2], penv->wlan_nv_macAddr[3],
+			penv->wlan_nv_macAddr[4], penv->wlan_nv_macAddr[5]);
 		break;
 
 	default:

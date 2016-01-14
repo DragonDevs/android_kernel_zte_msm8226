@@ -464,12 +464,12 @@ void hdd_remainChanReadyHandler( hdd_adapter_t *pAdapter )
     hdd_remain_on_chan_ctx_t* pRemainChanCtx = cfgState->remain_on_chan_ctx;
 
     hddLog( LOG1, "Ready on chan ind");
+    MTRACE(vos_trace(VOS_MODULE_ID_HDD,
+                     TRACE_CODE_HDD_REMAINCHANREADYHANDLER,
+                     pAdapter->sessionId, pRemainChanCtx->duration));
     if( pRemainChanCtx != NULL )
     {
-        MTRACE(vos_trace(VOS_MODULE_ID_HDD,
-                         TRACE_CODE_HDD_REMAINCHANREADYHANDLER,
-                         pAdapter->sessionId, pRemainChanCtx->duration));
-        if( REMAIN_ON_CHANNEL_REQUEST == pRemainChanCtx->rem_on_chan_request)
+        if( REMAIN_ON_CHANNEL_REQUEST == pRemainChanCtx->rem_on_chan_request )
         {
             cfg80211_ready_on_channel(
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
@@ -1505,6 +1505,8 @@ void hdd_indicateMgmtFrame( hdd_adapter_t *pAdapter,
     tANI_U8 type = 0;
     tANI_U8 subType = 0;
     tActionFrmType actionFrmType;
+    hdd_scaninfo_t *pScanInfo = NULL;
+    hdd_context_t *pHddCtx = NULL;
     hdd_cfg80211_state_t *cfgState = NULL;
 
     hddLog(VOS_TRACE_LEVEL_INFO, "%s: Frame Type = %d Frame Length = %d\n",
@@ -1563,6 +1565,8 @@ void hdd_indicateMgmtFrame( hdd_adapter_t *pAdapter,
         hddLog( LOGE, FL("pAdapter has invalid magic"));
         return;
     }
+
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
 
     if ((WLAN_HDD_SOFTAP == pAdapter->device_mode) ||
         (WLAN_HDD_P2P_GO == pAdapter->device_mode ))
@@ -1663,6 +1667,17 @@ void hdd_indicateMgmtFrame( hdd_adapter_t *pAdapter,
             }
 #endif
         }
+	{
+            pScanInfo =  &pHddCtx->scan_info;
+            if((pScanInfo != NULL) && (pHddCtx->scan_info.mScanPending))
+            {
+                hddLog(LOGE,"Action frame received when Scanning is in"
+                            " progress. Abort Scan.");
+                hdd_abort_mac_scan(pAdapter->pHddCtx,
+                                   eCSR_SCAN_ABORT_DEFAULT);
+             }
+        }
+
 #ifdef WLAN_FEATURE_TDLS_DEBUG
         if(pbFrames[WLAN_HDD_PUBLIC_ACTION_FRAME_OFFSET] == WLAN_HDD_TDLS_ACTION_FRAME)
         {

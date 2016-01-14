@@ -1887,7 +1887,6 @@ limPopulatePeerRateSet(tpAniSirGlobal pMac,
         (psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11A) ||
         (psessionEntry->dot11mode == WNI_CFG_DOT11_MODE_11N))
     {
-
         if (psessionEntry->extRateSet.numRates <= SIR_MAC_RATESET_EID_MAX)
         {
             vos_mem_copy((tANI_U8 *)tempRateSet2.rate,

@@ -284,6 +284,11 @@
 #define CFG_ENABLE_OXYNWK_MAX                    ( 1 )
 #define CFG_ENABLE_OXYNWK_DEFAULT                ( 0 )
 
+#define CFG_ADVERTISE_CONCURRENT_OPERATION_NAME    "gAdvertiseConcurrentOperation"
+#define CFG_ADVERTISE_CONCURRENT_OPERATION_DEFAULT ( 1 )
+#define CFG_ADVERTISE_CONCURRENT_OPERATION_MIN     ( 0 )
+#define CFG_ADVERTISE_CONCURRENT_OPERATION_MAX     ( 1 )
+
 typedef enum
 {
     eHDD_DOT11_MODE_AUTO = 0, //covers all things we support
@@ -1705,7 +1710,7 @@ typedef enum
 #define CFG_TDLS_IMPLICIT_TRIGGER_DEFAULT           ( 0 )
 
 #define CFG_TDLS_TX_STATS_PERIOD                    "gTDLSTxStatsPeriod"
-#define CFG_TDLS_TX_STATS_PERIOD_MIN                ( 10 )
+#define CFG_TDLS_TX_STATS_PERIOD_MIN                ( 2000 )
 #define CFG_TDLS_TX_STATS_PERIOD_MAX                ( 4294967295UL )
 #define CFG_TDLS_TX_STATS_PERIOD_DEFAULT            ( 5000 )
 
@@ -1730,7 +1735,7 @@ typedef enum
 #define CFG_TDLS_IDLE_TIMEOUT_DEFAULT               ( 5000 )
 
 #define CFG_TDLS_IDLE_PACKET_THRESHOLD              "gTDLSIdlePacketThreshold"
-#define CFG_TDLS_IDLE_PACKET_THRESHOLD_MIN          ( 0 )
+#define CFG_TDLS_IDLE_PACKET_THRESHOLD_MIN          ( 1 )
 #define CFG_TDLS_IDLE_PACKET_THRESHOLD_MAX          ( 40000 )
 #define CFG_TDLS_IDLE_PACKET_THRESHOLD_DEFAULT      ( 5 )
 
@@ -1768,11 +1773,6 @@ typedef enum
 #define CFG_TDLS_PUAPSD_RX_FRAME_THRESHOLD_MIN      (10)
 #define CFG_TDLS_PUAPSD_RX_FRAME_THRESHOLD_MAX      (20)
 #define CFG_TDLS_PUAPSD_RX_FRAME_THRESHOLD_DEFAULT  (10)
-
-#define CFG_TDLS_EXTERNAL_CONTROL                   "gTDLSExternalControl"
-#define CFG_TDLS_EXTERNAL_CONTROL_MIN               (0)
-#define CFG_TDLS_EXTERNAL_CONTROL_MAX               (1)
-#define CFG_TDLS_EXTERNAL_CONTROL_DEFAULT           (0)
 #endif
 
 #ifdef WLAN_ACTIVEMODE_OFFLOAD_FEATURE
@@ -2049,16 +2049,6 @@ This feature requires the dependent cfg.ini "gRoamPrefer5GHz" set to 1 */
 #define CFG_ENABLE_DEBUG_CONNECT_ISSUE_MIN         (0)
 #define CFG_ENABLE_DEBUG_CONNECT_ISSUE_MAX         (0xFF)
 #define CFG_ENABLE_DEBUG_CONNECT_ISSUE_DEFAULT     (0)
-
-#define CFG_OVERRIDE_COUNTRY_CODE                "gStaCountryCode"
-#define CFG_OVERRIDE_COUNTRY_CODE_DEFAULT        "000"
-/* If last disconnection was due to HB failure and we reconnect
- * to same AP next time, send Deauth before starting connection
- */
-#define CFG_ENABLE_DEAUTH_BEFORE_CONNECTION                  "gSendDeauthBeforeCon"
-#define CFG_ENABLE_DEAUTH_BEFORE_CONNECTION_MIN              (0)
-#define CFG_ENABLE_DEAUTH_BEFORE_CONNECTION_MAX              (1)
-#define CFG_ENABLE_DEAUTH_BEFORE_CONNECTION_DEFAULT          (0)
 
 /*--------------------------------------------------------------------------- 
   Type declarations
@@ -2419,7 +2409,6 @@ typedef struct
    v_U32_t                     fEnableTDLSBufferSta;
    v_U32_t                     fTDLSPuapsdInactivityTimer;
    v_U32_t                     fTDLSRxFrameThreshold;
-   v_BOOL_t                    fTDLSExternalControl;
 #endif
    v_U32_t                     enableLpwrImgTransition;
 #ifdef WLAN_SOFTAP_VSTA_FEATURE
@@ -2463,6 +2452,7 @@ typedef struct
    v_U32_t                     antennaDiversity;
    v_BOOL_t                    fEnableSNRMonitoring;
    v_U8_t                      isAmsduSupportInAMPDU;
+
    /*PNO related parameters */
 #ifdef FEATURE_WLAN_SCAN_PNO
    v_BOOL_t                    configPNOScanSupport;
@@ -2485,8 +2475,6 @@ typedef struct
    v_U32_t                     wlanLoggingNumBuf;
 #endif
    v_U32_t                     gEnableDebugLog;
-   char                        overrideCountryCode[4];
-   v_BOOL_t                    sendDeauthBeforeCon;
 } hdd_config_t;
 /*--------------------------------------------------------------------------- 
   Function declarations and documenation

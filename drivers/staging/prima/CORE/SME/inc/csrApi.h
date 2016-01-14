@@ -83,6 +83,7 @@ typedef enum
 #endif /* FEATURE_WLAN_CCX */
 #ifdef WLAN_FEATURE_11W
     eCSR_AUTH_TYPE_RSN_PSK_SHA256,
+    eCSR_AUTH_TYPE_RSN_8021X_SHA256,
 #endif
     eCSR_NUM_OF_SUPPORT_AUTH_TYPE,
     eCSR_AUTH_TYPE_FAILED = 0xff,
@@ -470,6 +471,14 @@ typedef enum
 #ifdef FEATURE_WLAN_LFR
     eCSR_ROAM_PMK_NOTIFY,
 #endif
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+    eCSR_ROAM_PREAUTH_INIT_NOTIFY,
+    eCSR_ROAM_PREAUTH_STATUS_SUCCESS,
+    eCSR_ROAM_PREAUTH_STATUS_FAILURE,
+    eCSR_ROAM_HANDOVER_SUCCESS,
+#endif
+//End fjdw67 Motorola
 #ifdef FEATURE_WLAN_TDLS
     eCSR_ROAM_TDLS_STATUS_UPDATE,
     eCSR_ROAM_RESULT_MGMT_TX_COMPLETE_IND,
@@ -574,6 +583,9 @@ typedef enum
     eCSR_ROAM_RESULT_TEARDOWN_TDLS_PEER_IND,
     eCSR_ROAM_RESULT_DELETE_ALL_TDLS_PEER_IND,
     eCSR_ROAM_RESULT_LINK_ESTABLISH_REQ_RSP,
+#ifdef FEATURE_WLAN_TDLS_OXYGEN_DISAPPEAR_AP
+    eCSR_ROAM_RESULT_TDLS_DISAPPEAR_AP_IND,
+#endif
 #endif
 
 }eCsrRoamResult;
@@ -879,13 +891,8 @@ typedef struct tagCsrRoamProfile
     tANI_U8 *pWAPIReqIE;   //If not null, it has the IE byte stream for WAPI
 #endif /* FEATURE_WLAN_WAPI */
 
-    //The byte count in the pAddIE for scan (at the time of join)
-    tANI_U32 nAddIEScanLength;
-    /* Additional IE information.
-     * It has the IE byte stream for additional IE,
-     * which can be WSC IE and/or P2P IE
-     */
-    tANI_U8  addIEScan[SIR_MAC_MAX_IE_LENGTH+2];       //Additional IE information.
+    tANI_U32 nAddIEScanLength;   //The byte count in the pAddIE for scan (at the time of join)
+    tANI_U8 *pAddIEScan;       //If not null, it has the IE byte stream for additional IE, which can be WSC IE and/or P2P IE
     tANI_U32 nAddIEAssocLength;   //The byte count in the pAddIE for assoc
     tANI_U8 *pAddIEAssoc;       //If not null, it has the IE byte stream for additional IE, which can be WSC IE and/or P2P IE
 
@@ -1139,7 +1146,6 @@ typedef struct tagCsrConfigParam
     tANI_U8 isAmsduSupportInAMPDU;
     tANI_U8 nSelect5GHzMargin;
 
-    tANI_BOOLEAN sendDeauthBeforeCon;
 }tCsrConfigParam;
 
 //Tush

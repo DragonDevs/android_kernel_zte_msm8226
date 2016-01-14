@@ -219,7 +219,7 @@ static void vos_pkti_replenish_raw_pool(void)
       pSkb = alloc_skb(VPKT_SIZE_BUFFER, GFP_ATOMIC);
       if (unlikely(NULL == pSkb))
       {
-         // we have replenished all that we can
+         gpVosPacketContext->rxReplenishFailCount++;
          break;
       }
       skb_reserve(pSkb, VPKT_SIZE_BUFFER);
@@ -2392,7 +2392,7 @@ VOS_STATUS vos_pkt_pop_head( vos_pkt_t *pPacket,
    // Make sure there is enough data to pop
    if (unlikely(skb->len < dataSize))
    {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_WARN,
+      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
                 "VPKT [%d]: pop exceeds packet size, len[%d], req[%d]",
                 __LINE__, skb->len, dataSize);
       return VOS_STATUS_E_INVAL;
@@ -2690,7 +2690,7 @@ VOS_STATUS vos_pkt_pop_tail( vos_pkt_t *pPacket,
    // Make sure there is enough data to pop
    if (unlikely(skb->len < dataSize))
    {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_WARN,
+      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
                 "VPKT [%d]: pop exceeds packet size, len[%d], req[%d]",
                 __LINE__, skb->len, dataSize);
       return VOS_STATUS_E_INVAL;
@@ -2767,7 +2767,7 @@ VOS_STATUS vos_pkt_trim_tail( vos_pkt_t *pPacket,
    // Make sure there is enough data to pop
    if (unlikely(skb->len < dataSize))
    {
-      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_WARN,
+      VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_FATAL,
                 "VPKT [%d]: pop exceeds packet size, len[%d], req[%d]",
                 __LINE__, skb->len, dataSize);
       return VOS_STATUS_E_INVAL;

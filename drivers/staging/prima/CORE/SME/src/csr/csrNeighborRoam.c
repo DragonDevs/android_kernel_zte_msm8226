@@ -996,6 +996,13 @@ static eHalStatus csrNeighborRoamIssuePreauthReq(tpAniSirGlobal pMac)
     tpCsrNeighborRoamControlInfo    pNeighborRoamInfo = &pMac->roam.neighborRoamInfo;
     eHalStatus status = eHAL_STATUS_SUCCESS;
     tpCsrNeighborRoamBSSInfo    pNeighborBssNode;
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+    tCsrRoamInfo *roamInfo;
+    roamInfo = vos_mem_malloc(sizeof(tCsrRoamInfo));
+#endif
+//End fjdw67 Motorola, IKJB42MAIN-6385
+
     
     /* This must not be true here */
     VOS_ASSERT(pNeighborRoamInfo->FTRoamInfo.preauthRspPending == eANI_BOOLEAN_FALSE);
@@ -1013,6 +1020,15 @@ static eHalStatus csrNeighborRoamIssuePreauthReq(tpAniSirGlobal pMac)
     }
     else
     {
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+        /* LFR metrics - pre-auth initiation metric. send the event to supplicant that pre-auth was initiated */
+        //vos_mem_zero(&roamInfo, sizeof(tCsrRoamInfo));
+        printk("Sending preauth init notify event \n");
+        vos_mem_copy((void *)roamInfo->bssid, (void *)pNeighborBssNode->pBssDescription->bssId, sizeof( tCsrBssid ));
+        csrRoamCallCallback(pMac, pNeighborRoamInfo->csrSessionId, roamInfo, 0, eCSR_ROAM_PREAUTH_INIT_NOTIFY, 0);
+#endif
+//End fjdw67 Motorola, IKJB42MAIN-6385
         status = csrRoamEnqueuePreauth(pMac, pNeighborRoamInfo->csrSessionId, pNeighborBssNode->pBssDescription,
                 eCsrPerformPreauth, eANI_BOOLEAN_TRUE);
 
@@ -1064,7 +1080,11 @@ eHalStatus csrNeighborRoamPreauthRspHandler(tpAniSirGlobal pMac, tSirRetStatus l
     VOS_STATUS  vosStatus = VOS_STATUS_SUCCESS;
     eHalStatus  preauthProcessed = eHAL_STATUS_SUCCESS;
     tpCsrNeighborRoamBSSInfo pPreauthRspNode = NULL;
-
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+    tCsrRoamInfo *roamInfo;
+#endif
+//End fjdw67 Motorola, IKJB42MAIN-6385
     if (eANI_BOOLEAN_FALSE == pNeighborRoamInfo->FTRoamInfo.preauthRspPending)
     {
             
@@ -1105,6 +1125,15 @@ eHalStatus csrNeighborRoamPreauthRspHandler(tpAniSirGlobal pMac, tSirRetStatus l
         smsLog(pMac, LOG1, FL("After Pre-Auth: BSSID "MAC_ADDRESS_STR", Ch:%d"),
                MAC_ADDR_ARRAY(pPreauthRspNode->pBssDescription->bssId),
                (int)pPreauthRspNode->pBssDescription->channelId);
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+        /* LFR metrics - pre-auth completion metric. send the event to supplicant that pre-auth successfully completed */
+        //printk("Preauth successfully completed send event notification \n");
+        roamInfo = vos_mem_malloc(sizeof(tCsrRoamInfo));
+        vos_mem_copy((void *)roamInfo->bssid, (void *)pPreauthRspNode->pBssDescription->bssId, sizeof( tCsrBssid ));
+        csrRoamCallCallback(pMac, pNeighborRoamInfo->csrSessionId, roamInfo, 0, eCSR_ROAM_PREAUTH_STATUS_SUCCESS, 0);
+#endif
+//End fjdw67 Motorola, IKJB42MAIN-6385
 
         /* Preauth competer successfully. Insert the preauthenticated node to tail of preAuthDoneList */
         csrNeighborRoamRemoveRoamableAPListEntry(pMac, &pNeighborRoamInfo->roamableAPList, pPreauthRspNode);
@@ -1144,7 +1173,18 @@ eHalStatus csrNeighborRoamPreauthRspHandler(tpAniSirGlobal pMac, tSirRetStatus l
 #endif
                 {
             status = csrNeighborRoamAddBssIdToPreauthFailList(pMac, pNeighborBssNode->pBssDescription->bssId);
-                }
+
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+               /* LFR metrics - pre-auth completion metric. send the event to supplicant that pre-auth successfully completed */
+               // vos_mem_zero(&roamInfo, sizeof(tCsrRoamInfo));
+               //printk("preauth failed. send event to wpa supplicant \n");
+               roamInfo = vos_mem_malloc(sizeof(tCsrRoamInfo));
+               vos_mem_copy((void *)roamInfo->bssid, (void *)pNeighborBssNode->pBssDescription->bssId, sizeof( tCsrBssid ));
+               csrRoamCallCallback(pMac, pNeighborRoamInfo->csrSessionId, roamInfo, 0, eCSR_ROAM_PREAUTH_STATUS_FAILURE, 0);
+#endif
+//End fjdw67 Motorola, IKJB42MAIN-6385
+               }
             /* Now we can free this node */
             csrNeighborRoamFreeNeighborRoamBSSNode(pMac, pNeighborBssNode);
             }
@@ -4505,6 +4545,13 @@ void csrNeighborRoamRequestHandoff(tpAniSirGlobal pMac)
     tANI_U32 roamId = 0;
     eHalStatus status;
 
+//Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+#ifdef FEATURE_WLAN_LFR_METRICS
+    tCsrRoamInfo *roamInfoMetrics;
+    roamInfoMetrics = vos_mem_malloc(sizeof(tCsrRoamInfo));
+#endif
+//End fjdw67 Motorola, IKJB42MAIN-6385
+
     if (pMac->roam.neighborRoamInfo.neighborRoamState != eCSR_NEIGHBOR_ROAM_STATE_PREAUTH_DONE) 
     {
         smsLog(pMac, LOGE, FL("Roam requested when Neighbor roam is in %s state"),
@@ -4522,8 +4569,16 @@ void csrNeighborRoamRequestHandoff(tpAniSirGlobal pMac)
     
     csrNeighborRoamGetHandoffAPInfo(pMac, &handoffNode);
     VOS_TRACE (VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_DEBUG,
-               FL("HANDOFF CANDIDATE BSSID "MAC_ADDRESS_STR),
-                                            MAC_ADDR_ARRAY(handoffNode.pBssDescription->bssId));
+           FL("HANDOFF CANDIDATE BSSID "MAC_ADDRESS_STR),
+                                          MAC_ADDR_ARRAY(handoffNode.pBssDescription->bssId));
+    //Begin fjdw67 Motorola, IKJB42MAIN-6385 - LFR roaming instrumentation
+    #ifdef FEATURE_WLAN_LFR_METRICS
+       /* LFR metrics - pre-auth completion metric. send the event to supplicant that pre-auth successfully completed */
+       //printk("Handoff candidate is initiated. send event to wpa supplicant \n");
+       vos_mem_copy((void *)roamInfoMetrics->bssid, (void *)handoffNode.pBssDescription->bssId, sizeof( tCsrBssid ));
+       csrRoamCallCallback(pMac, pNeighborRoamInfo->csrSessionId, roamInfoMetrics, 0, eCSR_ROAM_HANDOVER_SUCCESS, 0);
+    #endif
+    //End fjdw67 Motorola, IKJB42MAIN-6385
     /* Free the profile.. Just to make sure we dont leak memory here */ 
     csrReleaseProfile(pMac, &pNeighborRoamInfo->csrNeighborRoamProfile);
     /* Create the Handoff AP profile. Copy the currently connected profile and update only the BSSID and channel number
