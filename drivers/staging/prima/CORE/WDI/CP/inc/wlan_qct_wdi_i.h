@@ -4995,7 +4995,7 @@ WDI_RXMsgCTSCB
  @return Result of the function call
 */
 WDI_Status
-WDI_ProcessResponse
+static WDI_ProcessResponse
 (
   WDI_ControlBlockType*  pWDICtx,
   WDI_EventInfoType*     pEventData
