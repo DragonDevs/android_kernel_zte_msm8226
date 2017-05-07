@@ -18,6 +18,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/types.h>
+#include <linux/wakelock.h>
 
 #include <mach/msm_smd.h>
 #include <mach/subsystem_restart.h>
@@ -64,6 +65,8 @@ struct msm_ipc_router_smd_xprt_work {
 	struct work_struct work;
 };
 
+static struct wake_lock smd_adsp_wakelock;
+extern unsigned char smd_adsp;
 static void smd_xprt_read_data(struct work_struct *work);
 static void smd_xprt_open_event(struct work_struct *work);
 static void smd_xprt_close_event(struct work_struct *work);
@@ -233,6 +236,10 @@ static void smd_xprt_read_data(struct work_struct *work)
 	struct delayed_work *rwork = to_delayed_work(work);
 	struct msm_ipc_router_smd_xprt *smd_xprtp =
 		container_of(rwork, struct msm_ipc_router_smd_xprt, read_work);
+	if(smd_adsp == 1){
+		wake_lock_timeout(&smd_adsp_wakelock, HZ);
+		smd_adsp = 0;
+	}
 
 	spin_lock_irqsave(&smd_xprtp->ss_reset_lock, flags);
 	if (smd_xprtp->ss_reset) {
@@ -438,6 +445,7 @@ static int msm_ipc_router_smd_remote_probe(struct platform_device *pdev)
 	if (id < 0) {
 		pr_err("%s: called for unknown ch %s\n",
 			__func__, pdev->name);
+		wake_lock_destroy(&smd_adsp_wakelock);
 		return id;
 	}
 
@@ -446,6 +454,7 @@ static int msm_ipc_router_smd_remote_probe(struct platform_device *pdev)
 	if (!smd_remote_xprt[id].smd_xprt_wq) {
 		pr_err("%s: WQ creation failed for %s\n",
 			__func__, pdev->name);
+		wake_lock_destroy(&smd_adsp_wakelock);
 		return -EFAULT;
 	}
 
@@ -488,6 +497,7 @@ static int msm_ipc_router_smd_remote_probe(struct platform_device *pdev)
 			smd_remote_xprt[id].pil = NULL;
 		}
 		destroy_workqueue(smd_remote_xprt[id].smd_xprt_wq);
+		wake_lock_destroy(&smd_adsp_wakelock);
 		return rc;
 	}
 
@@ -543,6 +553,8 @@ static struct platform_driver msm_ipc_router_smd_remote_driver[] = {
 static int __init msm_ipc_router_smd_init(void)
 {
 	int i, ret, rc = 0;
+	
+	wake_lock_init(&smd_adsp_wakelock,WAKE_LOCK_SUSPEND, "smd_adsp_wakelock");
 	BUG_ON(ARRAY_SIZE(smd_xprt_cfg) != NUM_SMD_XPRTS);
 	for (i = 0; i < ARRAY_SIZE(msm_ipc_router_smd_remote_driver); i++) {
 		ret = platform_driver_register(

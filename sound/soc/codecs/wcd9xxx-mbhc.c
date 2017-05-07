@@ -52,7 +52,7 @@
 #define NUM_DCE_PLUG_DETECT 3
 #define NUM_DCE_PLUG_INS_DETECT 5
 #define NUM_ATTEMPTS_INSERT_DETECT 25
-#define NUM_ATTEMPTS_TO_REPORT 5
+#define NUM_ATTEMPTS_TO_REPORT 3 // chenjun:orig:5
 
 #define FAKE_INS_LOW 10
 #define FAKE_INS_HIGH 80
@@ -90,7 +90,7 @@
 
 #define WCD9XXX_HPHL_STATUS_READY_WAIT_US 1000
 #define WCD9XXX_MUX_SWITCH_READY_WAIT_MS 50
-#define WCD9XXX_MEAS_DELTA_MAX_MV 120
+#define WCD9XXX_MEAS_DELTA_MAX_MV 300 // chenjun:orig:120
 #define WCD9XXX_MEAS_INVALD_RANGE_LOW_MV 20
 #define WCD9XXX_MEAS_INVALD_RANGE_HIGH_MV 80
 
@@ -118,10 +118,10 @@
 /* RX_HPH_CNP_WG_TIME increases by 0.24ms */
 #define WCD9XXX_WG_TIME_FACTOR_US	240
 
-#define WCD9XXX_V_CS_HS_MAX 500
-#define WCD9XXX_V_CS_NO_MIC 5
-#define WCD9XXX_MB_MEAS_DELTA_MAX_MV 80
-#define WCD9XXX_CS_MEAS_DELTA_MAX_MV 12
+#define WCD9XXX_V_CS_HS_MAX 800 // chenjun:orig:500
+#define WCD9XXX_V_CS_NO_MIC 200 // chenjun:orig:5->30->200
+#define WCD9XXX_MB_MEAS_DELTA_MAX_MV 300 // chenjun:orig:80
+#define WCD9XXX_CS_MEAS_DELTA_MAX_MV 300 // chenjun:orig:12
 
 static int impedance_detect_en;
 module_param(impedance_detect_en, int,
@@ -130,6 +130,12 @@ MODULE_PARM_DESC(impedance_detect_en, "enable/disable impedance detect");
 
 static bool detect_use_vddio_switch;
 
+/* zte weizhijun 2013-12-17 start */
+#include <linux/time.h>
+#include <asm/uaccess.h>
+#include <linux/proc_fs.h>
+
+/* zte weizhijun 2013-12-17 end*/
 struct wcd9xxx_mbhc_detect {
 	u16 dce;
 	u16 sta;
@@ -567,7 +573,42 @@ static void wcd9xxx_jack_report(struct wcd9xxx_mbhc *mbhc,
 						status & SND_JACK_HEADPHONE);
 	}
 
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, start */
+// fix:Fake button press while inserting headset
+if (jack == &mbhc->button_jack)
+{
+    if (mbhc->reject_btn)
+    {
+        pr_err("chenjun:reject(%d) fake button(%#X)\n", mbhc->reject_btn, status);
+        mbhc->reject_btn = false;
+        return;
+    }
+}
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, end */
+
 	snd_soc_jack_report_no_dapm(jack, status, mask);
+/* ZTE_Audio_CJ_120530, chenjun, 2012-05-30, start */
+    if (jack == &mbhc->headset_jack)
+    {
+        pr_err("chenjun:%s:headset_jack status(%#X)\n", __func__, status);
+        if (SND_JACK_HEADSET == status)
+        {
+		mbhc->reject_btn = true;
+		schedule_delayed_work(&mbhc->reject_btn_dwork, msecs_to_jiffies(2600));
+    // pr_err("chenjun:schedule reject_btn_dwork:reject_btn(%d)\n", mbhc->reject_btn);
+        }
+        else if (0 == status)
+        {
+    // pr_err("chenjun:cancel reject_btn_dwork:reject_btn(%d)\n", mbhc->reject_btn);
+		cancel_delayed_work_sync(&mbhc->reject_btn_dwork);
+		mbhc->reject_btn = true;
+        }
+    }
+    else if (jack == &mbhc->button_jack)
+    {
+        pr_err("chenjun:%s:button_jack status(%#X)\n", __func__, status);
+    }
+/* ZTE_Audio_CJ_120530, chenjun, 2012-05-30, end */
 }
 
 static void __hphocp_off_report(struct wcd9xxx_mbhc *mbhc, u32 jack_status,
@@ -1327,6 +1368,7 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 	struct wcd9xxx_mbhc_detect *d = dt;
 	struct wcd9xxx_mbhc_detect *dprev = d, *dmicbias = NULL, *dgnd = NULL;
 	enum wcd9xxx_mbhc_plug_type type = PLUG_TYPE_INVALID;
+	int recover_plug_type = 0, hph_num = 0; // chejun
 
 	const struct wcd9xxx_mbhc_plug_type_cfg *plug_type =
 	    WCD9XXX_MBHC_CAL_PLUG_TYPE_PTR(mbhc->mbhc_cfg->calibration);
@@ -1353,11 +1395,14 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 		vdce = __wcd9xxx_codec_sta_dce_v(mbhc, true, d->dce,
 						 dce_z, (u32)mb_mv);
 		d->_vdces = vdce;
-		if (d->_vdces < no_mic)
+		if (d->_vdces < no_mic) {
 			d->_type = PLUG_TYPE_HEADPHONE;
+			pr_err("%s:(%d) mV below no_mic(%d)\n", __func__, d->_vdces, no_mic); // chenjun
+		}
 		else if (d->_vdces >= hs_max) {
-			d->_type = PLUG_TYPE_HIGH_HPH;
-			highhph_cnt++;
+			d->_type = PLUG_TYPE_HEADSET; // chenjun:orig:PLUG_TYPE_HIGH_HPH
+			pr_err("%s:HIGH (%d) mV above hs_max(%d), still as type(%d)\n", __func__, d->_vdces, hs_max, d->_type);
+			//highhph_cnt++;
 		} else
 			d->_type = PLUG_TYPE_HEADSET;
 
@@ -1379,9 +1424,11 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 		    (d->mic_bias &&
 		    (d->_vdces >= WCD9XXX_MEAS_INVALD_RANGE_LOW_MV &&
 		     d->_vdces <= WCD9XXX_MEAS_INVALD_RANGE_HIGH_MV))) {
-			pr_debug("%s: within invalid range\n", __func__);
+			    pr_err("%s: within invalid range:_vdces(%d):still valid\n", __func__, d->_vdces); // chenjun
+#if 0 // chenjun
 			type = PLUG_TYPE_INVALID;
 			goto exit;
+#endif
 		}
 	}
 
@@ -1392,16 +1439,17 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 	for (i = 0, d = dt; i < sz; i++, d++) {
 		if ((i > 0) && !d->mic_bias && !d->swap_gnd &&
 		    (d->_type != dprev->_type)) {
-			pr_debug("%s: Invalid, inconsistent types\n", __func__);
+			pr_err("%s: Invalid, inconsistent types:type(%d):prev type(%d)\n", __func__, d->_type, dprev->_type); // chenjun
 			type = PLUG_TYPE_INVALID;
+			recover_plug_type = 1; // chejun
 			goto exit;
 		}
 
 		if (!d->swap_gnd && !d->mic_bias &&
 		    (abs(minv - d->_vdces) > delta_thr ||
 		     abs(maxv - d->_vdces) > delta_thr)) {
-			pr_debug("%s: Invalid, delta %dmv, %dmv and %dmv\n",
-				 __func__, d->_vdces, minv, maxv);
+			pr_err("%s: Invalid, delta %dmv, %dmv and %dmv:delta_thr(%d)\n",
+				 __func__, d->_vdces, minv, maxv, delta_thr); // chenjun
 			type = PLUG_TYPE_INVALID;
 			goto exit;
 		} else if (d->swap_gnd) {
@@ -1415,7 +1463,8 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 	}
 	if (dgnd && dt->_type != PLUG_TYPE_HEADSET &&
 	    dt->_type != dgnd->_type) {
-		pr_debug("%s: Invalid, inconsistent types\n", __func__);
+		pr_err("%s: Invalid, inconsistent types:type(%d):dgnd type(%d)\n", __func__, dt->_type, dgnd->_type); // chenjun
+		recover_plug_type = 1; // chejun
 		type = PLUG_TYPE_INVALID;
 		goto exit;
 	}
@@ -1463,9 +1512,9 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 	if (!(event_state & (1UL << MBHC_EVENT_PA_HPHL))) {
 		if (((type == PLUG_TYPE_HEADSET ||
 		      type == PLUG_TYPE_HEADPHONE) && ch != sz)) {
-			pr_debug("%s: Invalid, not fully inserted, TYPE %d\n",
-				 __func__, type);
-			type = PLUG_TYPE_INVALID;
+			pr_err("%s: Invalid, not fully inserted, TYPE %d used:ch(%d):sz(%d)\n",
+				 __func__, type, ch, sz); // chenjun
+			// chenjun:type = PLUG_TYPE_INVALID;
 		}
 	}
 
@@ -1475,7 +1524,32 @@ wcd9xxx_cs_find_plug_type(struct wcd9xxx_mbhc *mbhc,
 		mbhc->micbias_enable = true;
 
 exit:
-	pr_debug("%s: Plug type %d detected\n", __func__, type);
+// chenjun:recover plug type
+	if (recover_plug_type)
+	{
+	    pr_err("%s: recover plug type(%d)\n", __func__, dt->_type); // chenjun
+	    for (i = 0, d = dt; i < sz; i++, d++)
+	    {
+	        if (PLUG_TYPE_HEADPHONE == d->_type)
+	        {
+	            hph_num++;
+	        }
+	    }
+
+	    if (hph_num > (sz/2))
+	    {
+	        type = PLUG_TYPE_HEADPHONE;
+	    }
+	    else
+	    {
+	        type = PLUG_TYPE_HEADSET;
+	    }
+
+	    pr_err("%s: recover done:hph_num(%d):half sz(%d):type(%d)\n", __func__, hph_num, (sz/2), type); // chenjun
+
+	}
+//
+	pr_err("%s: Plug type %d detected\n", __func__, type);
 	return type;
 }
 
@@ -2526,6 +2600,36 @@ static void wcd9xxx_btn_lpress_fn(struct work_struct *work)
 	wcd9xxx_unlock_sleep(mbhc->resmgr->core_res);
 }
 
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, start */
+// fix:Fake button press while inserting headset
+static void wcd9xxx_reject_btn_fn(struct work_struct *work)
+{
+	struct delayed_work *dwork;
+	struct wcd9xxx_mbhc *mbhc;
+
+	dwork = to_delayed_work(work);
+	mbhc = container_of(dwork, struct wcd9xxx_mbhc, reject_btn_dwork);
+
+	mbhc->reject_btn = false;
+
+	// pr_err("chenjun:wcd9xxx_reject_btn_fn:reject_btn(%d)\n", mbhc->reject_btn);
+}
+
+static void wcd9xxx_bootup_det_fn(struct work_struct *work)
+{
+	struct delayed_work *dwork;
+	struct wcd9xxx_mbhc *mbhc;
+
+	dwork = to_delayed_work(work);
+	mbhc = container_of(dwork, struct wcd9xxx_mbhc, bootup_det_dwork);
+
+	/* Setup for insertion detection */
+	wcd9xxx_insert_detect_setup(mbhc, true);
+
+	pr_err("chenjun:wcd9xxx_bootup_det_fn");
+}
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, end */
+
 static void wcd9xxx_mbhc_insert_work(struct work_struct *work)
 {
 	struct delayed_work *dwork;
@@ -2790,6 +2894,25 @@ static void wcd9xxx_correct_swch_plug(struct work_struct *work)
 					(highhph_cnt + 1) :
 					0;
 		highhph = wcd9xxx_mbhc_enable_mb_decision(highhph_cnt);
+
+// chenjun
+		if ((PLUG_TYPE_INVALID == plug_type)
+		    && (NUM_ATTEMPTS_TO_REPORT == retry)
+		    && (PLUG_TYPE_NONE == mbhc->current_plug)
+		    /* && ( !wcd9xxx_swch_level_remove(mbhc))*/ )
+		{
+		    plug_type = PLUG_TYPE_HEADSET;
+		    pr_debug("%s: change Invalid plug to type(%d) at retry(%d)\n",
+			 __func__, plug_type, retry);
+		}
+
+		if (wcd9xxx_swch_level_remove(mbhc)) {
+			wrk_complete = false;
+			pr_debug("%s: Switch level is low:type(%d) INVALID\n", __func__, plug_type);
+			plug_type = PLUG_TYPE_INVALID;
+			break;
+		}
+//
 		if (plug_type == PLUG_TYPE_INVALID) {
 			pr_debug("Invalid plug in attempt # %d\n", retry);
 			if (!mbhc->mbhc_cfg->detect_extn_cable &&
@@ -2883,7 +3006,7 @@ static void wcd9xxx_correct_swch_plug(struct work_struct *work)
 		}
 		WCD9XXX_BCL_UNLOCK(mbhc->resmgr);
 	}
-	pr_debug("%s: leave current_plug(%d)\n", __func__, mbhc->current_plug);
+	pr_debug("%s: leave current_plug(%d):retry(%d)\n", __func__, mbhc->current_plug, retry); // chenjun
 	/* unlock sleep */
 	wcd9xxx_unlock_sleep(mbhc->resmgr->core_res);
 }
@@ -2906,17 +3029,23 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 	if (wcd9xxx_cancel_btn_work(mbhc))
 		pr_debug("%s: button press is canceled\n", __func__);
 
-	/* cancel detect plug */
-	wcd9xxx_cancel_hs_detect_plug(mbhc,
-				      &mbhc->correct_plug_swch);
-
 	insert = !wcd9xxx_swch_level_remove(mbhc);
 	pr_debug("%s: Current plug type %d, insert %d\n", __func__,
 		 mbhc->current_plug, insert);
+//weizhijun fix headset plug noise start
+    if (insert) {
+        usleep_range(SWCH_IRQ_DEBOUNCE_TIME_US*200, SWCH_IRQ_DEBOUNCE_TIME_US*200);
+        insert = !wcd9xxx_swch_level_remove(mbhc);
+        pr_debug("%s: Current plug type %d, insert %d\n", __func__,
+            mbhc->current_plug, insert);
+    }
+//weizhijun fix headset plug noise end
 	if ((mbhc->current_plug == PLUG_TYPE_NONE) && insert) {
 		mbhc->lpi_enabled = false;
 		wmb();
-
+        /* cancel detect plug */
+        wcd9xxx_cancel_hs_detect_plug(mbhc,
+                &mbhc->correct_plug_swch);
 		if ((mbhc->current_plug != PLUG_TYPE_NONE) &&
 		    !(snd_soc_read(codec, WCD9XXX_A_MBHC_INSERT_DETECT) &
 				   (1 << 1)))
@@ -2930,7 +3059,9 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 	} else if ((mbhc->current_plug != PLUG_TYPE_NONE) && !insert) {
 		mbhc->lpi_enabled = false;
 		wmb();
-
+	    /* cancel detect plug */
+        wcd9xxx_cancel_hs_detect_plug(mbhc,
+                &mbhc->correct_plug_swch);
 		if (mbhc->current_plug == PLUG_TYPE_HEADPHONE) {
 			wcd9xxx_report_plug(mbhc, 0, SND_JACK_HEADPHONE);
 			is_removed = true;
@@ -2975,6 +3106,16 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 			wcd9xxx_turn_onoff_override(mbhc, false);
 		}
 	}
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, start */
+// fix:Insert headset slowly, detect as headphone
+	else if ((mbhc->current_plug == PLUG_TYPE_HEADPHONE) && insert) {
+		pr_err("%s: current_plug(%d), insert(%d), schedule correct_plug_swch\n", __func__,
+		           mbhc->current_plug, insert);
+
+		wcd9xxx_schedule_hs_detect_plug(mbhc,
+						&mbhc->correct_plug_swch);
+	}
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, end */
 exit:
 	mbhc->in_swch_irq_handler = false;
 	WCD9XXX_BCL_UNLOCK(mbhc->resmgr);
@@ -3070,6 +3211,8 @@ static int wcd9xxx_determine_button(const struct wcd9xxx_mbhc *mbhc,
 	if (btn == -1)
 		pr_debug("%s: couldn't find button number for mic mv %d\n",
 			 __func__, micmv);
+
+	pr_err("chenjun:%s:return:micmv(%d):btn(%d)\n", __func__, micmv, btn); // chenjun
 
 	return btn;
 }
@@ -3292,9 +3435,15 @@ irqreturn_t wcd9xxx_dce_handler(int irq, void *data)
 			mv_s[0] = vddio ? scale_v_micb_vddio(mbhc, mv[0],
 							     false) : mv[0];
 			btn = wcd9xxx_determine_button(mbhc, mv_s[0]);
+#if 0
 			if (btn != wcd9xxx_determine_button(mbhc, stamv_s))
 				btn = -1;
 			goto done;
+#else
+// chenjun:
+		pr_err("%s: without resume:btn(%d)\n", __func__, btn);
+		goto resume_done;
+#endif
 		}
 	}
 
@@ -3361,6 +3510,16 @@ irqreturn_t wcd9xxx_dce_handler(int irq, void *data)
 		}
 	}
 
+// chenjun
+	if ((btn < 0) && (btnmeas[0] >= 0))
+	{
+	    btn = btnmeas[0];
+	    pr_err("%s: too short press, as btn(%d)\n",
+			 __func__, btn);
+	}
+//
+// chenjun:
+resume_done:
 	if (btn >= 0) {
 		if (mbhc->in_swch_irq_handler) {
 			pr_debug(
@@ -3379,7 +3538,7 @@ irqreturn_t wcd9xxx_dce_handler(int irq, void *data)
 		mbhc->buttons_pressed |= mask;
 		wcd9xxx_lock_sleep(core_res);
 		if (schedule_delayed_work(&mbhc->mbhc_btn_dwork,
-					  msecs_to_jiffies(400)) == 0) {
+					  msecs_to_jiffies(500)) == 0) { // chenjun:orig:400
 			WARN(1, "Button pressed twice without release event\n");
 			wcd9xxx_unlock_sleep(core_res);
 		}
@@ -3862,10 +4021,16 @@ static int wcd9xxx_init_and_calibrate(struct wcd9xxx_mbhc *mbhc)
 			/* Bootup time detection */
 			wcd9xxx_swch_irq_handler(mbhc);
 		} else if (!ret && mbhc->mbhc_cfg->insert_detect) {
-			pr_debug("%s: Setting up codec own insert detection\n",
+			pr_err("%s: Delay Setting up codec own insert detection\n",
 				 __func__);
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, start */
+#if 0
 			/* Setup for insertion detection */
 			wcd9xxx_insert_detect_setup(mbhc, true);
+#else
+			schedule_delayed_work(&mbhc->bootup_det_dwork, msecs_to_jiffies(15000));
+#endif
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, end */
 		}
 	}
 
@@ -4552,6 +4717,21 @@ int wcd9xxx_mbhc_get_impedance(struct wcd9xxx_mbhc *mbhc, uint32_t *zl,
 	else
 		return -EINVAL;
 }
+/* zte weizhijun add headset detect /proc/hs 2013-12-17 start */
+static int hs_read(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int ret;
+    struct wcd9xxx_mbhc *mbhc = data;
+	if (off > 0) {
+		ret = 0;
+	} else {
+	pr_err("%s: enter %d\n", __func__, mbhc->current_plug);
+		ret = sprintf(page, "%d\n", mbhc->current_plug);
+	}
+
+    return ret;
+}
+/* zte weizhijun add headset detect /proc/hs 2013-12-17 end */
 
 /*
  * wcd9xxx_mbhc_init : initialize MBHC internal structures.
@@ -4568,7 +4748,7 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 {
 	int ret;
 	void *core_res;
-
+struct proc_dir_entry *proc_hs_type;
 	pr_debug("%s: enter\n", __func__);
 	memset(&mbhc->mbhc_bias_regs, 0, sizeof(struct mbhc_micbias_regs));
 	memset(&mbhc->mbhc_data, 0, sizeof(struct mbhc_internal_cal_data));
@@ -4628,6 +4808,15 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 		INIT_DELAYED_WORK(&mbhc->mbhc_btn_dwork, wcd9xxx_btn_lpress_fn);
 		INIT_DELAYED_WORK(&mbhc->mbhc_insert_dwork,
 				  wcd9xxx_mbhc_insert_work);
+
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, start */
+// fix:Fake button press while inserting headset
+		mbhc->reject_btn = true;
+		INIT_DELAYED_WORK(&mbhc->reject_btn_dwork, wcd9xxx_reject_btn_fn);
+
+		INIT_DELAYED_WORK(&mbhc->bootup_det_dwork, wcd9xxx_bootup_det_fn);
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, end */
+
 	}
 
 	/* Register event notifier */
@@ -4708,7 +4897,13 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 
 	wcd9xxx_regmgr_cond_register(resmgr, 1 << WCD9XXX_COND_HPH_MIC |
 					     1 << WCD9XXX_COND_HPH);
-
+/* zte weizhijun add headset detect /proc/hs 2013-12-17 start */
+	proc_hs_type = create_proc_read_entry("hs", S_IRUGO, NULL, hs_read, mbhc);
+	if (!proc_hs_type) {
+		printk(KERN_ERR"[YXS]hs: unable to register '/proc/hs' \n");
+	}
+	pr_err("weizhijun %s: enter\n", __func__);
+/* zte weizhijun add headset detect /proc/hs 2013-12-17 end*/
 	pr_debug("%s: leave ret %d\n", __func__, ret);
 	return ret;
 
@@ -4746,6 +4941,10 @@ void wcd9xxx_mbhc_deinit(struct wcd9xxx_mbhc *mbhc)
 	wcd9xxx_free_irq(core_res, mbhc->intr_ids->hph_left_ocp, mbhc);
 	wcd9xxx_free_irq(core_res, mbhc->intr_ids->hph_right_ocp, mbhc);
 
+/* zte weizhijun 2013-12-17 start */
+	remove_proc_entry("hs", NULL);
+pr_err("weizhijun %s: enter\n", __func__);
+/* zte weizhijun 2013-12-17 end */
 	wcd9xxx_resmgr_unregister_notifier(mbhc->resmgr, &mbhc->nblock);
 	wcd9xxx_cleanup_debugfs(mbhc);
 }

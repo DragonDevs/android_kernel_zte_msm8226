@@ -343,6 +343,13 @@ struct wcd9xxx_mbhc {
 	/* Holds codec specific interrupt mapping */
 	const struct wcd9xxx_mbhc_intr *intr_ids;
 
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, start */
+// fix:Fake button press while inserting headset
+	bool reject_btn;
+	struct delayed_work reject_btn_dwork;
+	struct delayed_work bootup_det_dwork;
+/* ZTE_CJ_EC617002567140, chenjun, 2014-1-10, end */
+
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs_poke;
 	struct dentry *debugfs_mbhc;

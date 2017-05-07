@@ -33,7 +33,7 @@ struct led_classdev {
 	int			 brightness;
 	int			 max_brightness;
 	int			 flags;
-
+	int                   blink_value;//zte add for blink_show()	
 	/* Lower 16 bits reflect status */
 #define LED_SUSPENDED		(1 << 0)
 	/* Upper 16 bits reflect control information */

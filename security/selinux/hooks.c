@@ -216,6 +216,14 @@ static int inode_alloc_security(struct inode *inode)
 
 	return 0;
 }
+//add for kernel bug by yxl 1008   possible NULL pointer dereference in selinux_inode_permission
+static void inode_free_rcu(struct rcu_head *head)
+{
+	struct inode_security_struct *isec;
+
+	isec = container_of(head, struct inode_security_struct, rcu);
+	kmem_cache_free(sel_inode_cache, isec);
+}
 
 static void inode_free_security(struct inode *inode)
 {
@@ -227,8 +235,19 @@ static void inode_free_security(struct inode *inode)
 		list_del_init(&isec->list);
 	spin_unlock(&sbsec->isec_lock);
 
-	inode->i_security = NULL;
-	kmem_cache_free(sel_inode_cache, isec);
+//	inode->i_security = NULL;  //add for kernel bug by yxl 1008   possible NULL pointer dereference in selinux_inode_permission
+
+//	kmem_cache_free(sel_inode_cache, isec);
+/*
+	 * The inode may still be referenced in a path walk and
++	 * a call to selinux_inode_permission() can be made
++	 * after inode_free_security() is called. Ideally, the VFS
++	 * wouldn't do this, but fixing that is a much harder
++	 * job. For now, simply free the i_security via RCU, and
++	 * leave the current inode->i_security pointer intact.
++	 * The inode will be freed after the RCU grace period too.
++	 */
+	call_rcu(&isec->rcu, inode_free_rcu);
 }
 
 static int file_alloc_security(struct file *file)
@@ -1464,6 +1483,7 @@ static int task_has_system(struct task_struct *tsk,
 	return avc_has_perm(sid, SECINITSID_KERNEL,
 			    SECCLASS_SYSTEM, perms, NULL);
 }
+ 
 
 /* Check whether a task has a particular permission to an inode.
    The 'adp' parameter is optional and allows other audit
@@ -1484,7 +1504,7 @@ static int inode_has_perm(const struct cred *cred,
 
 	sid = cred_sid(cred);
 	isec = inode->i_security;
-
+       
 	return avc_has_perm_flags(sid, isec->sid, isec->sclass, perms, adp, flags);
 }
 

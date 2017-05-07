@@ -531,7 +531,8 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 		}
 		if (data->opcode == APR_BASIC_RSP_RESULT) {
 			pr_debug("APR_BASIC_RSP_RESULT id %x\n", payload[0]);
-			if (payload[1] != 0) {
+// chenjun: 0x10328(ADM_CMD_SET_PP_PARAMS_V5) is NOT supported now
+			if ((payload[1] != 0) && (payload[0] != 0x10328)) {
 				pr_err("%s: cmd = 0x%x returned error = 0x%x\n",
 					__func__, payload[0], payload[1]);
 			}

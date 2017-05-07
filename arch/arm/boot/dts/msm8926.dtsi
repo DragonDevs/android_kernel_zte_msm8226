@@ -184,6 +184,7 @@
 
 &memory_hole {
 	qcom,memblock-remove = <0x08000000 0x7500000
+				0x1ef00000 0x100000  /*huang.yanjun define ram console addr and size*/
 				0x0fa00000 0x500000>; /* Address and size of the hole */
 };
 

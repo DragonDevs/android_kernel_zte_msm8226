@@ -242,7 +242,6 @@ static int msm_mpm_enable_irq_exclusive(
 		return 0;
 
 	mpm_pin = msm_mpm_get_irq_a2m(d);
-
 	if (mpm_pin == 0xff)
 		return 0;
 
@@ -571,6 +570,9 @@ void msm_mpm_exit_sleep(bool from_idle)
 		}
 	}
 }
+
+#include <linux/mutex.h>//zte
+static DEFINE_MUTEX(xo_enabled_lock);//zte
 static void msm_mpm_sys_low_power_modes(bool allow)
 {
 	static DEFINE_MUTEX(enable_xo_mutex);
@@ -624,6 +626,102 @@ static void msm_mpm_work_fn(struct work_struct *work)
 	}
 }
 
+#if defined(CONFIG_DEBUG_FS)
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+
+static struct dentry *mpm_debugfs_base=NULL;
+
+static void show_bypass_info(struct seq_file *m)
+{
+	struct hlist_node *elem;
+	struct mpm_irqs_a2m *node = NULL;
+	int j=0;
+	
+	seq_printf(m, "\n------------ mpm bypass info -------------\n");
+	for (j = 0; j < MSM_MPM_NR_MPM_IRQS; j++) {
+		hlist_for_each_entry(node, elem, &irq_hash[j], node) {
+			seq_printf(m, "%3d hwirq=%3lu pin=%3lu\n",
+						j,node->hwirq,node->pin);
+		}
+	}
+}
+static void show_detectable_info(struct seq_file *m)
+{
+	int j;
+	unsigned long *irq_bitmap1;
+	unsigned long *irq_bitmap2;
+	int ret=0;
+
+	seq_printf(m, "\n------------ mpm detectable info -------------\n");
+	for (j = 0; j < MSM_MPM_NR_IRQ_DOMAINS; j++) {
+		struct mpm_irqs *unlisted = &unlisted_irqs[j];
+		
+		seq_printf(m, "==Domain: [%s]\n",unlisted_irqs[j].domain_name);
+		irq_bitmap1 = unlisted->enabled_irqs;
+		ret = (bool) __bitmap_empty(irq_bitmap1, unlisted->size);
+		if (!ret) {
+			int i = 0;
+			i = find_first_bit(irq_bitmap1, unlisted->size);
+			seq_printf(m, "enabled_irqs:\n");
+
+			while (i < unlisted->size) {
+				seq_printf(m, "hwirq=%3d hash=%3d\n", i,hashfn(i));
+				i = find_next_bit(irq_bitmap1, unlisted->size, i + 1);
+			}
+		}
+		
+		irq_bitmap2 = unlisted->wakeup_irqs;
+		ret = (bool) __bitmap_empty(irq_bitmap2, unlisted->size);
+		if (!ret) {
+			int i = 0;
+			i = find_first_bit(irq_bitmap2, unlisted->size);
+			seq_printf(m, "wakeup_irqs:\n");
+
+			while (i < unlisted->size) {
+				seq_printf(m, "hwirq=%3d hash=%3d\n", i,hashfn(i));
+				i = find_next_bit(irq_bitmap2, unlisted->size, i + 1);
+			}
+		}
+
+	}
+
+}
+static int mpm_info_show(struct seq_file *m, void *unused)
+{
+	show_detectable_info(m);
+	show_bypass_info(m);
+	
+	return 0;
+}
+
+static int mpm_info_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mpm_info_show, inode->i_private);
+}
+
+static const struct file_operations mpm_info_fops = {
+	.open		= mpm_info_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release		= seq_release,
+};
+
+static int mpm_debugfs_init(void)
+{
+	int err = 0;
+	
+       mpm_debugfs_base = debugfs_create_dir("zte_mpm", NULL);
+	if (!mpm_debugfs_base)
+		return -ENOMEM;
+
+	if (!debugfs_create_file("mpm_info", S_IRUGO, mpm_debugfs_base,
+				NULL, &mpm_info_fops))
+		return -ENOMEM;
+
+	return err;
+}
+#endif
 static int __devinit msm_mpm_dev_probe(struct platform_device *pdev)
 {
 	struct resource *res = NULL;
@@ -718,6 +816,9 @@ static int __devinit msm_mpm_dev_probe(struct platform_device *pdev)
 	}
 
 	msm_mpm_initialized |= MSM_MPM_DEVICE_PROBED;
+#if defined(CONFIG_DEBUG_FS)
+	mpm_debugfs_init();
+#endif
 	return 0;
 }
 
@@ -857,7 +958,6 @@ void __init of_mpm_init(struct device_node *node)
 			mpm_of_map[i].chip->irq_set_type = msm_mpm_set_irq_type;
 			mpm_of_map[i].chip->irq_set_wake = msm_mpm_set_irq_wake;
 		}
-
 	}
 	msm_mpm_initialized |= MSM_MPM_IRQ_MAPPING_DONE;
 

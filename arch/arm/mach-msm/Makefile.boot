@@ -99,6 +99,13 @@ endif
 
 # MSM8226
    zreladdr-$(CONFIG_ARCH_MSM8226)	:= 0x00008000
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-cygni.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-warp4.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-draconis.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-eridani.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-gruis.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-aquilae.dtb
+	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-rf360.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-sim.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-fluid.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-v1-cdp.dtb

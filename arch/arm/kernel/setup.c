@@ -66,6 +66,10 @@
 #define MEM_SIZE	(16*1024*1024)
 #endif
 
+#if 1    //ZTE_XJB_20130216 for power_off charging
+int offcharging_flag=0;
+#endif//ZTE
+
 #if defined(CONFIG_FPE_NWFPE) || defined(CONFIG_FPE_FASTFPE)
 char fpe_type[8];
 
@@ -554,7 +558,9 @@ int __init arm_add_memory(phys_addr_t start, phys_addr_t size)
 	 */
 	if (bank->size == 0)
 		return -EINVAL;
-
+		
+	printk("bank: 0x%llx, size: 0x%llx\n",(long long)bank->start, (long long)bank->size);
+	
 	meminfo.nr_banks++;
 	return 0;
 }
@@ -957,6 +963,15 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_code   = (unsigned long) _etext;
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk	   = (unsigned long) _end;
+
+#if 1   //ZTE_XJB_20130216 for power_off charging
+        //get the boot mode here.
+        if (strstr(boot_command_line, "androidboot.mode=charger"))
+        {
+                offcharging_flag = 1;
+                printk("ZTE :boot mode is offcharging/charger \n"); //ZTE
+        }
+#endif
 
 	/* populate cmd_line too for later use, preserving boot_command_line */
 	strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);

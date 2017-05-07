@@ -393,8 +393,9 @@ static ssize_t store_sampling_rate(struct kobject *a, struct attribute *b,
 {
 	unsigned int input;
 	int ret;
+	printk("store_sampling_rate");
 	ret = sscanf(buf, "%u", &input);
-	if (ret != 1)
+	if (ret != 1 || input > 100000)
 		return -EINVAL;
 	update_sampling_rate(input);
 	return count;
@@ -1183,11 +1184,22 @@ bail_acq_sema_failed:
 
 	return 0;
 }
+#ifndef CONFIG_ZTE_PLATFORM_ONDEMAND
+#define CONFIG_ZTE_PLATFORM_ONDEMAND 1
+#endif
 
 static void dbs_input_event(struct input_handle *handle, unsigned int type,
 		unsigned int code, int value)
 {
 	int i;
+#ifdef CONFIG_ZTE_PLATFORM_ONDEMAND
+		if(!((strstr(handle->dev->name, "touch"))		//touchscreen needs to increase cpufreq
+		#ifndef CONFIG_ZTE_NO_CPUFREQ_ONDEMAND_KEYBOARD //LHX_PM_20110706_01 not change cpufreq while keyboard input
+				|| (strstr(handle->dev->name, "keypad"))		//keypad  needs to increase cpufreq
+		#endif			
+				))
+				return; //no need to increase cpufreq if input is not touchscreen or keypad
+#endif
 
 	if ((dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MAXLEVEL) ||
 		(dbs_tuners_ins.powersave_bias == POWERSAVE_BIAS_MINLEVEL)) {

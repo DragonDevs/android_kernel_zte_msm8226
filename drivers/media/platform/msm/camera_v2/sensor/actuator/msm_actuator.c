@@ -19,13 +19,64 @@
 
 DEFINE_MSM_MUTEX(msm_actuator_mutex);
 
-/*#define MSM_ACUTUATOR_DEBUG*/
+//#define MSM_ACUTUATOR_DEBUG
 #undef CDBG
 #ifdef MSM_ACUTUATOR_DEBUG
 #define CDBG(fmt, args...) pr_err(fmt, ##args)
 #else
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #endif
+/*
+*merged from 8x10kk for OV8835 actuator calibration by caidezun 20140715
+*/
+#if defined(CONFIG_OV8835)
+void get_otp_af_info(int * vcm_start, int *vcm_end);
+#endif
+
+static int actuator_bu64291=0 ;
+#if defined(CONFIG_AR0542) // distinguish actuator maker id, weilanying add
+extern  int32_t get_actuator_cam_name(int cam_name);
+#endif
+
+/*
+ * Support for camera actuator by ZTE_BOOT_JIA_20130729, jia.jia
+ */
+ 
+/*
+ * Rohm bu64291 I2C Bus Format (Fast mode SCL = 400kHz)
+ *
+ * | S | 0 | 0 | 0 | 1 | 1 | 0 | 0 | 0 | A | PS | EN | W2 | W1 |W0 | M | D9 | D8 | A | D7 | .. | D0 | A |
+ *
+ * S: start signal  P: stop signal  A: acknowledge
+ * 
+ *
+ * Rohm bu64291 Register Description
+ *
+ * ----------------------------------------------------------------------------------------
+ * REG NAME | SETTING ITEM         | DESCRIPTION
+ * ----------------------------------------------------------------------------------------
+ * R/W      | Read/write mode      | R/W=0=write mode, R/W=1=read mode
+ * ----------------------------------------------------------------------------------------
+ * PS       | Serial power state   | 0 = Driver in standby mode, 1 = Driver in operating mode
+ * ----------------------------------------------------------------------------------------
+ * EN       | Driver output status | 0 = ISOURCE output off, 1 = Current output/sequence start
+ * ----------------------------------------------------------------------------------------
+ * M        | Mode select          | If W2 W1 W0 != 110, then M=0=ISRC mode disabled, M=1=ISRC mode enabled
+ *          |                      | If W2 W1 W0 = 110, then M=0=PWM output operation, M=1=linear output operation
+ * ----------------------------------------------------------------------------------------
+ * w2w1w0   | Register address     | 000 = Point C target DAC, 001 = Actuator frequency settings/slew rate settings
+ *          |                      | 010 = Point A target DAC, 011 = Point B target DAC
+ *          |                      | 100 = Step mode settings, 101 = PWM settings
+ *          |                      | 110 = Point C target DAC
+ * ----------------------------------------------------------------------------------------
+ * D9 to D0 | Data bits            | Register data
+ * ----------------------------------------------------------------------------------------
+ */
+#define ROHM_BU64291_REG_ADDR            (0x00F4)
+#define ROHM_BU64291_REG_DATA_MASK_D9D8  (0x0300)
+#define MSM_ACTUATOR_REG_ADDR(reg_data)  \
+	(ROHM_BU64291_REG_ADDR | ((reg_data & ROHM_BU64291_REG_DATA_MASK_D9D8) >> 8))
+
 
 static struct msm_actuator msm_vcm_actuator_table;
 static struct msm_actuator msm_piezo_actuator_table;
@@ -85,11 +136,18 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 			break;
 		}
 		if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC) {
+
+		if(actuator_bu64291){
+			value = (MSM_ACTUATOR_REG_ADDR(next_lens_position) << 8)
+					| (next_lens_position & 0x00FF);
+
+		}else{
 			value = (next_lens_position <<
 				write_arr[i].data_shift) |
 				((hw_dword & write_arr[i].hw_mask) >>
 				write_arr[i].hw_shift);
-
+		}
+		CDBG("next_lens_position: %d\n", next_lens_position);
 			if (write_arr[i].reg_addr != 0xFFFF) {
 				i2c_byte1 = write_arr[i].reg_addr;
 				i2c_byte2 = value;
@@ -375,6 +433,13 @@ static int32_t msm_actuator_init_step_table(struct msm_actuator_ctrl_t *a_ctrl,
 			}
 		}
 	}
+
+/*added for debug print*/
+#if 0
+    for (i=0; i <= step_index-1;i++) {
+      CDBG("step_position_table[%d]=%d\n",i,a_ctrl->step_position_table[i]);
+	}
+#endif
 	CDBG("Exit\n");
 	return 0;
 }
@@ -447,7 +512,68 @@ static int32_t msm_actuator_set_position(
 	CDBG("%s exit %d\n", __func__, __LINE__);
 	return rc;
 }
+/*
+*merged from 8x10kk for OV8835 actuator calibration by caidezun 20140715
+*/
+#if defined(CONFIG_OV8835)
+static int af_actuator_sensor_ov8835_flush_cali_afc(struct msm_actuator_ctrl_t *a_ctrl,struct reg_settings_t *init_settings)
+{
+  int  vcm_start, vcm_end;
+  int32_t step_bound_region_0, step_bound_region_1;
+  
+  get_otp_af_info(&vcm_start,  &vcm_end);
+  pr_err("%s:vcm_start=%d, vcm_end=%d", __func__, vcm_start, vcm_end);
+  
+  if(vcm_start>=vcm_end){
+      pr_err("%s:return for otp value error vcm_start>=vcm_end", __func__);
+      return 0;
+  } 
+  
+  step_bound_region_0 = a_ctrl->region_params[0].step_bound[0] - a_ctrl->region_params[0].step_bound[1];
+  step_bound_region_1 = a_ctrl->region_params[1].step_bound[0] - a_ctrl->region_params[1].step_bound[1];
+  if (step_bound_region_0 <= 0 || step_bound_region_1 <= 0) {
+    pr_err("%s: Invalid Argument - step_bound", __func__);
+    return -EINVAL;
+  }
 
+  /*
+   * Calculate code per step
+   */
+  if (vcm_start > 450) {
+    a_ctrl->region_params[0].code_per_step = (uint16_t)((vcm_start - 180) / step_bound_region_0);
+  } else if (vcm_start > 380 && vcm_start <= 450) {
+    a_ctrl->region_params[0].code_per_step = (uint16_t)((vcm_start - 160) / step_bound_region_0);
+  } else if (vcm_start > 340 && vcm_start <= 380) {
+    a_ctrl->region_params[0].code_per_step = (uint16_t)((vcm_start - 140) / step_bound_region_0);
+  } else if (vcm_start > 300 && vcm_start <= 340) {
+    a_ctrl->region_params[0].code_per_step = (uint16_t)((vcm_start - 120) / step_bound_region_0);
+  } else if (vcm_start > 100 && vcm_start <= 300) {
+    a_ctrl->region_params[0].code_per_step = (uint16_t)((vcm_start - 100) / step_bound_region_0);
+  } else {
+    // Do nothing here
+  }
+
+  if ((vcm_end - vcm_start) > 0) {
+    a_ctrl->region_params[1].code_per_step = (vcm_end - vcm_start) / step_bound_region_1;
+  } else {
+    // Do nothing here
+  }
+
+  pr_err("%s: region_params[0].code_per_step: %d", __func__, a_ctrl->region_params[0].code_per_step);
+  pr_err("%s: region_params[1].code_per_step: %d", __func__, a_ctrl->region_params[1].code_per_step);
+  
+  if (a_ctrl->region_params[0].code_per_step > 0) {
+    init_settings[0].reg_data = a_ctrl->region_params[0].code_per_step + 10;
+    init_settings[1].reg_data = a_ctrl->region_params[0].code_per_step * 2 - 2;
+  } else {
+    // Do nothing here
+  }
+  pr_err("%s: init_settings[0].reg_data: %d", __func__, init_settings[0].reg_data);
+  pr_err("%s: init_settings[1].reg_data: %d", __func__, init_settings[1].reg_data);  
+
+  return 0;
+}
+#endif
 static int32_t msm_actuator_init(struct msm_actuator_ctrl_t *a_ctrl,
 	struct msm_actuator_set_info_t *set_info) {
 	struct reg_settings_t *init_settings = NULL;
@@ -484,8 +610,15 @@ static int32_t msm_actuator_init(struct msm_actuator_ctrl_t *a_ctrl,
 
 	if (a_ctrl->act_device_type == MSM_CAMERA_PLATFORM_DEVICE) {
 		cci_client = a_ctrl->i2c_client.cci_client;
+
+/*
+ * Support for camera actuator by ZTE_BOOT_JIA_20130729, jia.jia
+ */
+#if 0
 		cci_client->sid =
 			set_info->actuator_params.i2c_addr >> 1;
+#endif
+
 		cci_client->retries = 3;
 		cci_client->id_map = 0;
 		cci_client->cci_i2c_master = a_ctrl->cci_master;
@@ -542,6 +675,16 @@ static int32_t msm_actuator_init(struct msm_actuator_ctrl_t *a_ctrl,
 				pr_err("Error copying init_settings\n");
 				return -EFAULT;
 			}
+/*
+*merged from 8x10kk for OV8835 actuator calibration by caidezun 20140715
+*/
+#if defined(CONFIG_OV8835)
+			if(1 == actuator_bu64291){				
+				rc = af_actuator_sensor_ov8835_flush_cali_afc(a_ctrl, init_settings);
+				if(rc < 0) 
+                pr_err("ov8835 af calibration falied!!!\n");        
+			}
+#endif
 			rc = a_ctrl->func_tbl->actuator_init_focus(a_ctrl,
 				set_info->actuator_params.init_setting_size,
 				a_ctrl->i2c_data_type,
@@ -578,6 +721,10 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 	CDBG("%s type %d\n", __func__, cdata->cfgtype);
 	switch (cdata->cfgtype) {
 	case CFG_GET_ACTUATOR_INFO:
+   #if defined(CONFIG_AR0542) // distinguish actuator maker id, weilanying add
+	get_actuator_cam_name((int)&a_ctrl->cam_name);
+	printk("wly: a_ctrl->subdev_id =%d, a_ctrl->cam_name=%d", a_ctrl->subdev_id ,a_ctrl->cam_name);
+	#endif
 		cdata->is_af_supported = 1;
 		cdata->cfg.cam_name = a_ctrl->cam_name;
 		break;
@@ -844,6 +991,15 @@ static int32_t msm_actuator_platform_probe(struct platform_device *pdev)
 	int32_t rc = 0;
 	struct msm_camera_cci_client *cci_client = NULL;
 	struct msm_actuator_ctrl_t *msm_actuator_t = NULL;
+
+/*
+ * Support for camera actuator by ZTE_BOOT_JIA_20130729, jia.jia
+ */
+#if 1
+	uint32_t slave_addr;
+	const char *actuator_name;
+#endif
+
 	CDBG("Enter\n");
 
 	if (!pdev->dev.of_node) {
@@ -891,6 +1047,41 @@ static int32_t msm_actuator_platform_probe(struct platform_device *pdev)
 
 	cci_client = msm_actuator_t->i2c_client.cci_client;
 	cci_client->cci_subdev = msm_cci_get_subdev();
+
+/*
+ * Support for camera actuator by ZTE_BOOT_JIA_20130729, jia.jia
+ */
+#if 1
+	rc = of_property_read_u32((&pdev->dev)->of_node, "qcom,slave-addr",
+		&slave_addr);
+	CDBG("qcom,slave-addr 0x%x, rc %d\n", slave_addr, rc);
+	if (rc < 0) {
+		pr_err("failed rc %d\n", rc);
+		return rc;
+	}
+
+	cci_client->sid = slave_addr >> 1;
+#endif
+
+/*
+ * Support for camera actuator by ZTE_CAM_CDZ_20131204
+ */
+#if 1
+	if (of_property_read_bool((&pdev->dev)->of_node, "qcom,actuator-name" ) ==
+		true) {
+		rc = of_property_read_string((&pdev->dev)->of_node, "qcom,actuator-name",
+				&actuator_name);
+		if (rc < 0) {
+			pr_err("failed rc %d\n", rc);
+			return rc;
+		}
+		pr_err("qcom,actuator-name %s, rc %d\n", actuator_name, rc);
+		if(!strcmp(actuator_name,"bu64291")){
+		actuator_bu64291=1;
+		}
+	}
+#endif
+
 	cci_client->cci_i2c_master = MASTER_MAX;
 	v4l2_subdev_init(&msm_actuator_t->msm_sd.sd,
 		msm_actuator_t->act_v4l2_subdev_ops);

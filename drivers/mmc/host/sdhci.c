@@ -31,10 +31,25 @@
 
 #include "sdhci.h"
 
+//ruanmeisi
+#include <linux/proc_fs.h>
+
 #define DRIVER_NAME "sdhci"
 
+#ifdef CONFIG_MMC_DEBUG
 #define DBG(f, x...) \
 	pr_debug(DRIVER_NAME " [%s()]: " f, __func__,## x)
+#else
+#define DBG(fmt, args...)  \
+	do {                                      \
+	   if(mmc_debug)                                        \
+	      printk(KERN_ERR"%s: " fmt, __func__ , ## args) ;  \
+	}while(0)
+
+static struct proc_dir_entry * d_entry;
+int mmc_debug = 0;
+#endif
+
 
 #if defined(CONFIG_LEDS_CLASS) || (defined(CONFIG_LEDS_CLASS_MODULE) && \
 	defined(CONFIG_MMC_SDHCI_MODULE))
@@ -1144,6 +1159,8 @@ static void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 	if (cmd->data)
 		host->data_start_time = ktime_get();
 	sdhci_writew(host, SDHCI_MAKE_CMD(cmd->opcode, flags), SDHCI_COMMAND);
+
+	DBG("%s:op %02x arg %08x flags %08x\n",mmc_hostname(host->mmc),cmd->opcode, cmd->arg, cmd->flags);
 }
 
 static void sdhci_finish_command(struct sdhci_host *host)
@@ -1666,6 +1683,8 @@ static void sdhci_do_set_ios(struct sdhci_host *host, struct mmc_ios *ios)
 	}
 
 	ctrl = sdhci_readb(host, SDHCI_HOST_CONTROL);
+
+	DBG("%s:ios->clock=%u,ios->timing=%d\n",mmc_hostname(host->mmc),ios->clock,ios->timing);
 
 	if ((ios->timing == MMC_TIMING_SD_HS ||
 	     ios->timing == MMC_TIMING_MMC_HS)
@@ -3618,6 +3637,61 @@ void sdhci_free_host(struct sdhci_host *host)
 
 EXPORT_SYMBOL_GPL(sdhci_free_host);
 
+
+//ruanmeisi_091224 proc interface
+#ifndef CONFIG_MMC_DEBUG
+static int msm_sdhci_read_proc(
+        char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	int len = 0;
+	len = sprintf(page, "%s\n",
+            !!mmc_debug == 1?"on":"off");
+	return len;
+
+}
+
+static int msm_sdhci_write_proc(struct file *file, const char __user *buffer,
+        unsigned long count, void *data)
+{
+	char tmp[16] = {0};
+	int len = 0;
+	len = count;
+	if (count > sizeof(tmp)) {
+	   len = sizeof(tmp) - 1;
+	}
+	if (copy_from_user(tmp, buffer, len))
+	   return -EFAULT;
+	if (strstr(tmp, "on")) {
+	   mmc_debug = 1;
+	} else if (strstr(tmp, "off")) {
+	   mmc_debug = 0;
+	}
+	return count;
+}
+
+
+static void
+init_mmc_proc(void)
+{
+	d_entry = create_proc_entry("sdhci_log",0, NULL);
+	if (d_entry) {
+	   d_entry->read_proc = msm_sdhci_read_proc;
+	   d_entry->write_proc = msm_sdhci_write_proc;
+	   d_entry->data = NULL;
+	}
+}
+
+static void
+deinit_mmc_proc(void)
+{
+	if (NULL != d_entry) {
+	   remove_proc_entry("sdhci_log", NULL);
+	   d_entry = NULL;
+	}
+}
+#endif
+//end
+
 /*****************************************************************************\
  *                                                                           *
  * Driver init/exit                                                          *
@@ -3630,11 +3704,22 @@ static int __init sdhci_drv_init(void)
 		": Secure Digital Host Controller Interface driver\n");
 	pr_info(DRIVER_NAME ": Copyright(c) Pierre Ossman\n");
 
+	//ruanmeisi_091224 proc interface
+	#ifndef CONFIG_MMC_DEBUG
+	  init_mmc_proc();
+	#endif
+	//end
+
 	return 0;
 }
 
 static void __exit sdhci_drv_exit(void)
 {
+	//ruanmeisi_091224 proc interface
+	#ifndef CONFIG_MMC_DEBUG
+	  deinit_mmc_proc();
+	#endif
+	//end
 }
 
 module_init(sdhci_drv_init);

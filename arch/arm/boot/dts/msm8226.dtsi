@@ -1206,26 +1206,28 @@
 
 	spi_0: spi@f9923000 { /* BLSP1 QUP1 */
 		compatible = "qcom,spi-qup-v2";
+		cell-index = <4>;
 		#address-cells = <1>;
 		#size-cells = <0>;
-		reg-names = "spi_physical", "spi_bam_physical";
-		reg = <0xf9923000 0x1000>,
-		      <0xf9904000 0xF000>;
-		interrupt-names = "spi_irq", "spi_bam_irq";
-		interrupts = <0 95 0>, <0 238 0>;
+		reg-names = "spi_physical";
+		reg = <0xf9923000 0x1000>;
+		interrupt-names = "spi_irq";
+		interrupts = <0 95 0>;
 		spi-max-frequency = <19200000>;
 
 		qcom,gpio-mosi = <&msmgpio 0 0>;
 		qcom,gpio-miso = <&msmgpio 1 0>;
 		qcom,gpio-clk  = <&msmgpio 3 0>;
-		qcom,gpio-cs0  = <&msmgpio 22 0>;
+		qcom,gpio-cs0  = <&msmgpio 2 0>;
 
-		qcom,infinite-mode = <0>;
-		qcom,use-bam;
-		qcom,ver-reg-exists;
-		qcom,bam-consumer-pipe-index = <12>;
-		qcom,bam-producer-pipe-index = <13>;
 		qcom,master-id = <86>;
+                /*
+		ice40_irda@1 {
+			compatible = "lattice,ice40_irda";
+			reg = <1>;
+			spi-max-frequency = <19200000>;
+		};
+                */
 	};
 
 	qcom,bam_dmux@fc834000 {
@@ -1248,8 +1250,8 @@
                 qcom,msm-bus,num-cases = <2>;
                 qcom,msm-bus,num-paths = <1>;
                 qcom,msm-bus,vectors-KBps =
-                                <1 618 0 0>,
-                                <1 618 0 800>;
+                                <54 618 0 0>,
+                                <54 618 0 800>;
 	};
 
 	qcom,tz-log@fe805720 {

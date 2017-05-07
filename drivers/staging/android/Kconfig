@@ -44,6 +44,15 @@ config ANDROID_RAM_CONSOLE
 	bool "Android RAM buffer console"
 	depends on !S390 && !UML && HAVE_MEMBLOCK
 	select ANDROID_PERSISTENT_RAM
+	select ZTE_RAM_CONSOLE
+	default n
+
+#
+# Add support for RAM console by ZTE_BOOT_JIA_20130121 jia.jia
+#
+config ZTE_RAM_CONSOLE
+	bool "ZTE RAM buffer console"
+	depends on ANDROID_RAM_CONSOLE
 	default n
 
 config PERSISTENT_TRACER

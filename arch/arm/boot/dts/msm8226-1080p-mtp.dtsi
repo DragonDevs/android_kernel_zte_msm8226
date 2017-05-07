@@ -17,33 +17,6 @@
 		status = "ok";
 	};
 
-	i2c@f9927000 { /* BLSP1 QUP5 */
-		synaptics@20 {
-			compatible = "synaptics,rmi4";
-			reg = <0x20>;
-			interrupt-parent = <&msmgpio>;
-			interrupts = <17 0x2008>;
-			vdd-supply = <&pm8226_l19>;
-			vcc_i2c-supply = <&pm8226_lvs1>;
-			synaptics,reset-gpio = <&msmgpio 16 0x00>;
-			synaptics,irq-gpio = <&msmgpio 17 0x2008>;
-			synaptics,display-coords = <0 0 1079 1919>;
-			synaptics,i2c-pull-up;
-			synaptics,power-down;
-			synaptics,disable-gpios;
-		};
-	};
-
-	gen-vkeys {
-		compatible = "qcom,gen-vkeys";
-		label = "synaptics_rmi4_i2c";
-		qcom,disp-maxx = <1079>;
-		qcom,disp-maxy = <1919>;
-		qcom,panel-maxx = <1079>;
-		qcom,panel-maxy = <2084>;
-		qcom,key-codes = <158 139 102 217>;
-	};
-
 	i2c@f9925000 { /* BLSP1 QUP3 */
 		nfc-nci@0e {
 			compatible = "qcom,nfc-nci";
@@ -55,37 +28,6 @@
 			interrupt-parent = <&msmgpio>;
 			interrupts = <21 0>;
 			qcom,clk-gpio = <&pm8226_gpios 3 0>;
-		};
-	};
-	gpio_keys {
-		compatible = "gpio-keys";
-		input-name = "gpio-keys";
-
-		camera_focus {
-			label = "camera_focus";
-			gpios = <&msmgpio 108 0x1>;
-			linux,input-type = <1>;
-			linux,code = <0x210>;
-			gpio-key,wakeup;
-			debounce-interval = <15>;
-		};
-
-		camera_snapshot {
-			label = "camera_snapshot";
-			gpios = <&msmgpio 107 0x1>;
-			linux,input-type = <1>;
-			linux,code = <0x2fe>;
-			gpio-key,wakeup;
-			debounce-interval = <15>;
-		};
-
-		vol_up {
-			label = "volume_up";
-			gpios = <&msmgpio 106 0x1>;
-			linux,input-type = <1>;
-			linux,code = <115>;
-			gpio-key,wakeup;
-			debounce-interval = <15>;
 		};
 	};
 
@@ -106,10 +48,14 @@
 		qcom,audio-routing =
 			"RX_BIAS", "MCLK",
 			"LDO_H", "MCLK",
+			"Lineout_1 amp", "LINEOUT1",
+			"Lineout_2 amp", "LINEOUT2",
 			"SPK_OUT", "MCLK",
 			"SPK_OUT", "EXT_VDD_SPKR",
 			"AMIC1", "MIC BIAS1 External",
 			"MIC BIAS1 External", "Handset Mic",
+			"AMIC3", "MIC BIAS1 External",
+			"MIC BIAS1 External", "Fluence Mic",
 			"AMIC2", "MIC BIAS2 External",
 			"MIC BIAS2 External", "Headset Mic",
 			"AMIC4", "MIC BIAS2 External",
@@ -264,21 +210,7 @@
 
 &spmi_bus {
 	qcom,pm8226@0 {
-		qcom,leds@a100 {
-			status = "okay";
-			qcom,led_mpp_2 {
-				label = "mpp";
-				linux,name = "button-backlight";
-				linux,default-trigger = "none";
-				qcom,default-state = "off";
-				qcom,max-current = <40>;
-				qcom,current-setting = <5>;
-				qcom,id = <6>;
-				qcom,mode = "manual";
-				qcom,source-sel = <1>;
-				qcom,mode-ctrl = <0x60>;
-			};
-		};
+
 
 		qcom,leds@a300 {
 			status = "okay";
@@ -495,13 +427,12 @@
 };
 
 &pm8226_chg {
-	qcom,charging-disabled;
+	/*qcom,charging-disabled;*/
 	qcom,battery-data = <&mtp_batterydata>;
 };
 
 &slim_msm {
 	tapan_codec {
-		qcom,cdc-micbias1-ext-cap;
 	};
 };
 

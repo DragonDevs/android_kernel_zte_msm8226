@@ -217,14 +217,15 @@ struct cpr_regulator {
 	int		*corner_map;
 	u32		num_corners;
 	int		*quot_adjust;
-
+	u32		quotient_adjustment;
 	bool		is_cpr_suspended;
 };
 
 #define CPR_DEBUG_MASK_IRQ	BIT(0)
 #define CPR_DEBUG_MASK_API	BIT(1)
 
-static int cpr_debug_enable = CPR_DEBUG_MASK_IRQ;
+//static int cpr_debug_enable = CPR_DEBUG_MASK_IRQ;
+static int cpr_debug_enable = 0;//ZTE_PM_LHX_20140410 disable debug
 static int cpr_enable;
 static struct cpr_regulator *the_cpr;
 
@@ -383,8 +384,9 @@ static void cpr_ctl_disable(struct cpr_regulator *cpr_vreg)
 	cpr_write(cpr_vreg, REG_RBIF_CONT_ACK_CMD, 1);
 	cpr_write(cpr_vreg, REG_RBIF_CONT_NACK_CMD, 1);
 	cpr_ctl_modify(cpr_vreg, RBCPR_CTL_LOOP_EN, 0);
-}
 
+
+}
 static bool cpr_ctl_is_enabled(struct cpr_regulator *cpr_vreg)
 {
 	u32 reg_val;
@@ -911,13 +913,10 @@ static int cpr_suspend(struct cpr_regulator *cpr_vreg)
 	cpr_debug("suspend\n");
 
 	mutex_lock(&cpr_vreg->cpr_mutex);
-
 	cpr_ctl_disable(cpr_vreg);
 
 	cpr_irq_clr(cpr_vreg);
-
 	cpr_vreg->is_cpr_suspended = true;
-
 	mutex_unlock(&cpr_vreg->cpr_mutex);
 	return 0;
 }
@@ -928,7 +927,6 @@ static int cpr_resume(struct cpr_regulator *cpr_vreg)
 	cpr_debug("resume\n");
 
 	mutex_lock(&cpr_vreg->cpr_mutex);
-
 	cpr_vreg->is_cpr_suspended = false;
 	cpr_irq_clr(cpr_vreg);
 
@@ -1194,7 +1192,7 @@ static int __devinit cpr_pvs_init(struct platform_device *pdev,
 			cpr_vreg->floor_volt[CPR_FUSE_CORNER_SVS],
 			cpr_vreg->floor_volt[CPR_FUSE_CORNER_NORMAL],
 			cpr_vreg->floor_volt[CPR_FUSE_CORNER_TURBO]);
-
+    printk("PVS_BIN: %d\r\n", cpr_vreg->pvs_bin);  //by yxl for debug info
 	return 0;
 }
 

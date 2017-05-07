@@ -495,4 +495,20 @@ config QPNP_BMS
 	  Say Y here to enable support for QPNP chip bms device.
 	  It registers a fuelgauge bms power supply to report
 	  State of Charge.
+
+config ZTE_EXTERNAL_OVP
+        bool "ZTE External OVP Support"
+	default y
+        help
+          Say Y here to enable external ovp support.
+
+
+config ZTE_CHGPATH_SWITCH
+        bool "ZTE Charge Path Switch"
+	default n
+        help
+          Say Y here to enable charge path switch for Wireless Charge.
+          There is only one charge path,we need this feature to support
+          Wireless Charge
+
 endif # POWER_SUPPLY

@@ -167,6 +167,7 @@ enum usb_chg_type {
 	USB_ACA_DOCK_CHARGER,
 	USB_PROPRIETARY_CHARGER,
 	USB_FLOATED_CHARGER,
+	USB_WIRELESS_CHARGER,//zte
 };
 
 /**
@@ -463,6 +464,9 @@ struct msm_otg {
 	bool ext_chg_active;
 	struct completion ext_chg_wait;
 	int ui_enabled;
+	/*wall charger in which D+/D- disconnected would be recognized as usb cable, 7/7*/
+	struct delayed_work invalid_chg_work;
+	/*end*/
 	bool pm_done;
 	struct qpnp_vadc_chip	*vadc_dev;
 };

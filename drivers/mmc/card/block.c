@@ -80,6 +80,9 @@ MODULE_ALIAS("mmc:block");
 #define PCKD_TRGR_LOWER_BOUND		5
 #define PCKD_TRGR_PRECISION_MULTIPLIER	100
 
+//yeganlin_20140102,set system device to ro if it was write protected
+#define MAX_PARTION_NUMBER  128
+
 static DEFINE_MUTEX(block_mutex);
 
 /*
@@ -264,7 +267,66 @@ static ssize_t power_ro_lock_store(struct device *dev,
 	mmc_blk_put(md);
 	return count;
 }
+//yeganlin_20140102,set system device to ro if it was write protected
+#if 1
+#define CMD31_SEND_WRITE_PROT_TYPE 31
+#define ROUNDUP(a, b) (((a) + ((b)-1)) & ~((b)-1))
+static int
+get_emmc_wp_status(struct mmc_card *card, unsigned int addr, void *buf)
+{
+	struct mmc_request mrq = {NULL};
+	struct mmc_command cmd = {0};
+	struct mmc_data data = {0};
+	struct scatterlist sg;
+	void *data_buf;
 
+	unsigned int wp_grp_size;
+	pr_err("ygl get_emmc_wp_status()::e,addr=%d\n",addr);
+
+	/* dma onto stack is unsafe/nonportable, but callers to this
+	 * routine normally provide temporary on-stack buffers ...
+	 */
+	data_buf = kmalloc(8, GFP_KERNEL);
+	if (data_buf == NULL)
+		return -ENOMEM;
+
+	mrq.cmd = &cmd;
+	mrq.data = &data;
+
+	cmd.opcode = CMD31_SEND_WRITE_PROT_TYPE;
+//yeganlin,20140717
+	wp_grp_size = card->ext_csd.raw_hc_erase_gap_size * (card->ext_csd.hc_erase_size);
+	cmd.arg = ROUNDUP(addr, wp_grp_size);//;
+	pr_err("ygl get_emmc_wp_status()::e,wp_grp_size=%d, addr=%d, cmd.arg=%d\n",wp_grp_size, addr, cmd.arg);
+
+	//cmd.arg = addr;//540672;
+
+	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
+
+	data.blksz = 8;
+	data.blocks = 1;
+	data.flags = MMC_DATA_READ;
+	data.sg = &sg;
+	data.sg_len = 1;
+
+	sg_init_one(&sg, data_buf, 8);
+
+	mmc_set_data_timeout(&data, card);
+
+	mmc_wait_for_req(card->host, &mrq);
+
+	memcpy(buf, data_buf, 8);
+	kfree(data_buf);
+
+	if (cmd.error)
+		return cmd.error;
+	if (data.error)
+		return data.error;
+	pr_err("ygl get_emmc_wp_status()::x\n");
+
+	return 0;
+}
+#endif
 static ssize_t force_ro_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
@@ -3121,6 +3183,13 @@ static int mmc_blk_probe(struct mmc_card *card)
 	struct mmc_blk_data *md, *part_md;
 	char cap_str[10];
 
+//yeganlin_20140102,set system device to ro if it was write protected
+#if 1
+	int i,j;
+	struct hd_struct *p;
+	unsigned char wp_status_buf[8];
+	memset(wp_status_buf, 0, 8);
+#endif
 	/*
 	 * Check that the card supports the command class(es) we need.
 	 */
@@ -3153,6 +3222,35 @@ static int mmc_blk_probe(struct mmc_card *card)
 		if (mmc_add_disk(part_md))
 			goto out;
 	}
+
+//yeganlin_20140102,set system device to ro if it was write protected
+#if 1
+	if(mmc_card_mmc(card)){
+	    for(i = 1; i < MAX_PARTION_NUMBER; i++){
+	        p = disk_get_part(md->disk, i);
+	        if (p) {
+	            if (p->info && p->info->volname[0]){
+	                if(!strcmp(p->info->volname,"system")){
+	                    mmc_rpm_hold(card->host, &card->dev);
+	                    mmc_claim_host(card->host);
+	                    get_emmc_wp_status(card, p->start_sect, wp_status_buf);
+	                    mmc_release_host(card->host);
+	                    mmc_rpm_release(card->host, &card->dev);
+	                    for(j = 0; j < 8; j++)
+	                        pr_err("ygl mmc_blk_probe()::e,wp_status_buf[%d]=%d\n",j,wp_status_buf[j]);
+	                    if(wp_status_buf[7] == 0xAA){ //10101010
+	                        pr_err("ygl mmc_blk_probe()::set system device to ro,partno=%d\n",i);
+	                        p ->policy = 1;
+	                    }
+	                    disk_put_part(p);
+	                    break;
+	                }
+	            }
+	        }
+	        disk_put_part(p);
+	    }
+	}
+#endif
 	return 0;
 
  out:

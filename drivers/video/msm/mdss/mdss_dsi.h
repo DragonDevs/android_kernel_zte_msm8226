@@ -82,6 +82,7 @@ enum dsi_panel_bl_ctrl {
 	BL_PWM,
 	BL_WLED,
 	BL_DCS_CMD,
+	BL_CMD_GPIO,
 	UNKNOWN_CTRL,
 };
 
@@ -263,12 +264,15 @@ struct mdss_dsi_ctrl_pdata {
 	int irq_cnt;
 	int rst_gpio;
 	int disp_en_gpio;
+	int lcd_5v_vsp_en_gpio;
+	int lcd_5v_vsn_en_gpio;
 	int disp_te_gpio;
 	int mode_gpio;
 	int disp_te_gpio_requested;
 	int bklt_ctrl;	/* backlight ctrl */
 	int pwm_period;
 	int pwm_pmic_gpio;
+	int bl_cmd_gpio;
 	int pwm_lpg_chan;
 	int bklt_max;
 	int new_fps;
@@ -338,6 +342,8 @@ int mdss_dsi_clk_init(struct platform_device *pdev,
 void mdss_dsi_clk_deinit(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 int mdss_dsi_enable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 void mdss_dsi_disable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
+void mdss_dsi_panel_5v_power(struct mdss_panel_data *pdata, int enable);
+void mdss_dsi_phy_enable(struct mdss_dsi_ctrl_pdata *ctrl, int on);
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable);
 void mdss_dsi_phy_disable(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_phy_init(struct mdss_panel_data *pdata);
@@ -345,6 +351,7 @@ void mdss_dsi_phy_sw_reset(unsigned char *ctrl_base);
 void mdss_dsi_cmd_test_pattern(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_video_test_pattern(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl);
+void mdss_dsi_panel_bl_cmd_gpio_cfg(struct mdss_dsi_ctrl_pdata *ctrl);
 
 void mdss_dsi_ctrl_init(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_cmd_mdp_busy(struct mdss_dsi_ctrl_pdata *ctrl);

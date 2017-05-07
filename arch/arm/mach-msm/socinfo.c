@@ -1114,6 +1114,69 @@ static struct sys_device soc_sys_device = {
 	.cls = &soc_sysdev_class,
 };
 
+/*
+ * Support for FTM & RECOVERY mode by ZTE_BOOT_JIA_20120305, jia.jia
+ * ZTE_PLATFORM
+ */
+#ifdef ZTE_BOOT_MODE
+static int g_boot_mode = 0;
+
+void socinfo_set_boot_mode(int boot_mode)
+{
+	g_boot_mode = boot_mode;
+}
+
+int socinfo_get_ftm_flag(void)
+{
+    return g_boot_mode == BOOT_MODE_FTM ? 1 : 0;
+}
+EXPORT_SYMBOL(socinfo_get_ftm_flag);
+
+int socinfo_get_recovery_flag(void)
+{
+    return g_boot_mode == BOOT_MODE_RECOVERY ? 1 : 0;
+}
+EXPORT_SYMBOL(socinfo_get_recovery_flag);
+
+int socinfo_get_ffbm_flag(void)
+{
+    return g_boot_mode == BOOT_MODE_FFBM ? 1 : 0;
+}
+EXPORT_SYMBOL(socinfo_get_ffbm_flag);
+
+/*
+ * Support for reading board ID by ZTE_BOOT
+ */
+
+static const char *socinfo_zte_hw_ver = NULL;
+
+static ssize_t socinfo_show_zte_hw_ver(struct sys_device *dev,
+                                               struct sysdev_attribute *attr,
+                                               char *buf)
+{
+    return snprintf(buf, PAGE_SIZE, "%s\n", socinfo_zte_hw_ver);
+}
+
+/*
+ * Defined for op in '/sys/devices/system/soc/soc0/zte_hw_ver'
+ */
+static struct sysdev_attribute socinfo_zte_hw_ver_files[] = {
+    _SYSDEV_ATTR(zte_hw_ver, 0444, socinfo_show_zte_hw_ver, NULL),
+};
+
+void socinfo_sync_sysfs_zte_hw_ver(const char *hw_ver)
+{
+    if ((hw_ver == NULL) || (PAGE_SIZE < (strlen(hw_ver) + 1))) {
+        pr_err("%s: invalid length\n", __func__);
+        socinfo_zte_hw_ver = "INVALID";
+        return;
+    }
+
+    socinfo_zte_hw_ver = hw_ver;
+}
+EXPORT_SYMBOL(socinfo_sync_sysfs_zte_hw_ver);
+#endif
+
 static int __init socinfo_create_files(struct sys_device *dev,
 					struct sysdev_attribute files[],
 					int size)
@@ -1257,6 +1320,17 @@ static int __init socinfo_init_sysdev(void)
 		goto socinfo_init_err;
 	}
 
+/*
+ * Support for reading board ID by ZTE_BOOT
+ */
+#ifdef ZTE_BOOT_MODE
+    err = socinfo_create_files(&soc_sys_device, socinfo_zte_hw_ver_files,
+                               ARRAY_SIZE(socinfo_zte_hw_ver_files));
+    if (err) {
+        pr_err("%s: socinfo_create_files(socinfo_zte_board_id_files)=%d\n", __func__, err);
+        return err;
+    }
+#endif
 	socinfo_create_files(&soc_sys_device, socinfo_v1_files,
 				ARRAY_SIZE(socinfo_v1_files));
 	if (socinfo->v1.format < 2)

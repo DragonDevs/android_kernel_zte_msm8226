@@ -320,6 +320,8 @@ struct csi_lane_params_t {
 
 struct msm_sensor_info_t {
 	char sensor_name[MAX_SENSOR_NAME];
+	char module_name[MAX_SENSOR_NAME];
+	char default_module_name[MAX_SENSOR_NAME];
 	int32_t    session_id;
 	int32_t     subdev_id[SUB_MODULE_MAX];
 };
@@ -351,6 +353,20 @@ struct msm_sensor_init_params {
 	/* sensor mount angle */
 	uint32_t            sensor_mount_angle;
 };
+
+//Added by weilanying 20131122 begin
+#if 1
+struct msm_sensor_module_info_t {
+	char module_name[64];
+	char sensor_name[64];
+	char actuator_name[64];
+	uint16_t actuator_id;
+	char flash_name[64];
+	char resolution_raw_format[64];
+	uint16_t chip_id;
+};
+#endif
+//Added by weilanying 20131122 end
 
 struct sensorb_cfg_data {
 	int cfgtype;
@@ -435,6 +451,9 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_WHITE_BALANCE,
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
+	//Added by weilanying 20131023
+	CFG_OTP_PARAMS,
+	CFG_MODULE_INFOR_PARAMS,
 };
 
 enum msm_actuator_cfg_type_t {

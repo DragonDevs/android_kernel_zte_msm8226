@@ -28,6 +28,61 @@ static struct persistent_ram_zone *ram_console_zone;
 static const char *bootinfo;
 static size_t bootinfo_size;
 
+/*
+ * RAM console support by ZTE_BOOT_JIA_20130121 jia.jia
+ */
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+static struct persistent_ram ram;
+
+/*
+ * To fix compiling warning of 'Section mismatch in reference from the function'
+ * with the macro of 'CONFIG_DEBUG_SECTION_MISMATCH=y'
+ * by ZTE_BOOT_JIA_20121010 jia.jia
+ */
+static int __devinit ram_console_persistent_ram_init(struct platform_device *pdev)
+{
+	struct resource *res = NULL;
+	u32 num_res;
+	int i;
+	int ret;
+
+	res	    = pdev->resource;
+	num_res = pdev->num_resources;
+
+	if ((res == NULL)
+		|| (num_res < 1)
+		|| !(res->flags & IORESOURCE_MEM)) {
+		pr_err("%s: invalid resource, %p %d flags %lx!\n", __func__, res, num_res, res ? res->flags : 0);
+		return -ENXIO;
+	}
+
+	memset(&ram, 0, sizeof(struct persistent_ram));
+
+	ram.start	  = res[0].start;
+	ram.size	  = 0;
+	ram.num_descs = num_res;
+	/* allocated once only, no kfree here */
+	ram.descs	  = (struct persistent_ram_descriptor *)kzalloc(ram.num_descs * sizeof(struct persistent_ram_descriptor),
+																GFP_KERNEL);
+
+	for (i = 0; i < ram.num_descs; ++i) {
+		ram.descs[i].name = pdev->name;
+		ram.descs[i].size = res[i].end - res[i].start + 1;
+
+		ram.size += ram.descs[i].size;
+	}
+
+	ret = persistent_ram_early_init(&ram);
+	if (ret < 0) {
+		return ret;
+	}
+
+	pr_info("ram_console: got buffer's phys address at 0x%x, size 0x%x\n", ram.start, ram.size);
+
+	return 0;
+}
+#endif /* CONFIG_ZTE_RAM_CONSOLE */
+
 static void
 ram_console_write(struct console *console, const char *s, unsigned int count)
 {
@@ -55,7 +110,23 @@ static int __devinit ram_console_probe(struct platform_device *pdev)
 	struct ram_console_platform_data *pdata = pdev->dev.platform_data;
 	struct persistent_ram_zone *prz;
 
+/*
+ * RAM console support by ZTE_BOOT_JIA_20130121 jia.jia
+ * Disable ECC here
+ */
+#ifdef CONFIG_ZTE_RAM_CONSOLE
+	int ret;
+
+	ret = ram_console_persistent_ram_init(pdev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	prz = persistent_ram_init_ringbuffer(&pdev->dev, false);
+#else
 	prz = persistent_ram_init_ringbuffer(&pdev->dev, true);
+#endif /* CONFIG_ZTE_RAM_CONSOLE */
+
 	if (IS_ERR(prz))
 		return PTR_ERR(prz);
 

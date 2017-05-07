@@ -3158,6 +3158,7 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("mem_clk",    gcc_boot_rom_ahb_clk.c, "fc880000.qcom,mss"),
 	/* NFC */
 	CLK_LOOKUP("ref_clk",            cxo_d1_a_pin.c, "2-000e"),
+	CLK_LOOKUP("ref_clk",            cxo_d1.c, "spi0.1"),
 	/* PIL-PRONTO */
 	CLK_LOOKUP("xo", cxo_pil_pronto_clk.c, "fb21b000.qcom,pronto"),
 
@@ -3421,14 +3422,21 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6d.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,camera"),
-	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "20.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "0.qcom,camera"),//add for ar0542 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "1.qcom,camera"),//add for ov8835 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "2.qcom,camera"),//add for ov9760 by YCM_CAM_ZTE
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "3.qcom,camera"),//add for ov5648 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "4.qcom,camera"),//add for IMX135 by CDZ_CAM_ZTE 
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6f.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "90.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6d.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,camera"),
-	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "20.qcom,camera"),
-
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "0.qcom,camera"),//add for ar0542 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "1.qcom,camera"),//add for ov8835 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "2.qcom,camera"),//add for ov9760 by YCM_CAM_ZTE
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "3.qcom,camera"),//add for ov5648 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "4.qcom,camera"),//add for IMX135 by CDZ_CAM_ZTE 
 	/* eeprom clocks */
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,eeprom"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,eeprom"),

@@ -5703,7 +5703,7 @@ static int tapan_post_reset_cb(struct wcd9xxx *wcd9xxx)
 	ret = wcd9xxx_mbhc_init(&tapan->mbhc, &tapan->resmgr, codec,
 				tapan_enable_mbhc_micbias,
 				&mbhc_cb, &cdc_intr_ids, rco_clk_rate,
-				TAPAN_CDC_ZDET_SUPPORTED);
+				false);//chenjun orig:TAPAN_CDC_ZDET_SUPPORTED
 	if (ret)
 		pr_err("%s: mbhc init failed %d\n", __func__, ret);
 	else
@@ -5911,7 +5911,7 @@ static int tapan_codec_probe(struct snd_soc_codec *codec)
 	ret = wcd9xxx_mbhc_init(&tapan->mbhc, &tapan->resmgr, codec,
 				tapan_enable_mbhc_micbias,
 				&mbhc_cb, &cdc_intr_ids, rco_clk_rate,
-				TAPAN_CDC_ZDET_SUPPORTED);
+				false); //chenjun: orig TAPAN_CDC_ZDET_SUPPORTED
 
 	if (ret) {
 		pr_err("%s: mbhc init failed %d\n", __func__, ret);

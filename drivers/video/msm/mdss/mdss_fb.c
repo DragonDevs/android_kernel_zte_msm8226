@@ -50,6 +50,7 @@
 #include <mach/iommu.h>
 #include <mach/iommu_domains.h>
 #include <mach/msm_memtypes.h>
+#include <mach/socinfo.h>
 
 #include "mdss_fb.h"
 
@@ -453,7 +454,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	mfd->ext_ad_ctrl = -1;
 	mfd->bl_level = 0;
 	mfd->bl_scale = 1024;
-	mfd->bl_min_lvl = 30;
+	mfd->bl_min_lvl = 3;//30;
 	mfd->fb_imgType = MDP_RGBA_8888;
 
 	mfd->pdev = pdev;
@@ -531,6 +532,8 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	}
 
 	if (mfd->splash_logo_enabled) {
+		mfd->splash_thread = NULL;//pan
+		return rc;//pan
 		mfd->splash_thread = kthread_run(mdss_fb_splash_thread, mfd,
 				"mdss_fb_splash");
 		if (IS_ERR(mfd->splash_thread)) {
@@ -775,10 +778,21 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	struct mdss_panel_data *pdata;
 	int (*update_ad_input)(struct msm_fb_data_type *mfd);
 	u32 temp = bkl_lvl;
+#if defined CONFIG_BOARD_DRACONIS || defined CONFIG_BOARD_GRUIS
+    int rc=0;
+#endif
 
 	if (((!mfd->panel_power_on && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) {
 		mfd->unset_bl_level = bkl_lvl;
+#if defined CONFIG_BOARD_DRACONIS || defined CONFIG_BOARD_GRUIS
+    rc=socinfo_get_ffbm_flag();
+	printk("%s BOOT_MODE_FFBM ? 1 : 0 rc=%d,bkl_lv=%d\n",__func__,rc,bkl_lvl);
+	if(rc==1 && bkl_lvl==0){
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+	pdata->set_backlight(pdata, 0);
+		}
+#endif
 		return;
 	} else {
 		mfd->unset_bl_level = 0;
@@ -823,6 +837,9 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 		pdata = dev_get_platdata(&mfd->pdev->dev);
 		if ((pdata) && (pdata->set_backlight)) {
 			mutex_lock(&mfd->bl_lock);
+		#if (defined( CONFIG_BOARD_GRUIS)||defined(CONFIG_BOARD_WARP4))//P892A12,S06
+			msleep(50);
+		#endif
 			mfd->bl_level = mfd->unset_bl_level;
 			pdata->set_backlight(pdata, mfd->bl_level);
 			mfd->bl_level_old = mfd->unset_bl_level;
@@ -837,7 +854,9 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	int ret = 0;
-
+#if defined CONFIG_BOARD_DRACONIS ||defined CONFIG_BOARD_GRUIS
+	int rc = 0;
+#endif
 	if (!op_enable)
 		return -EPERM;
 
@@ -856,6 +875,12 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			mfd->update.type = NOTIFY_TYPE_UPDATE;
 			mfd->update.is_suspend = 0;
 			mutex_unlock(&mfd->update.lock);
+    #ifdef CONFIG_BOARD_GRUIS
+    rc=socinfo_get_ffbm_flag();
+	printk("%s FB_BLANK_UNBLANK BOOT_MODE_FFBM ? 1 : 0 rc=%d\n",__func__,rc);
+	if(rc==0)
+		mdss_fb_set_backlight(mfd, 241);
+	#endif
 
 			/* Start the work thread to signal idle time */
 			if (mfd->idle_time)
@@ -880,7 +905,15 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			del_timer(&mfd->no_update.timer);
 			mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
 			complete(&mfd->no_update.comp);
-
+		#ifdef CONFIG_BOARD_GRUIS
+		printk("%s FB_BLANK_POWERDOWN BOOT_MODE_FFBM ? 1 : 0 rc=%d\n",__func__,rc);
+			mdss_fb_set_backlight(mfd, 0);
+		#elif defined CONFIG_BOARD_DRACONIS
+			rc=socinfo_get_ffbm_flag();
+			printk("%s FB_BLANK_POWERDOWN BOOT_MODE_FFBM ? 1 : 0 rc=%d\n",__func__,rc);
+		if(rc==1)
+			mdss_fb_set_backlight(mfd, 0);
+		#endif
 			mfd->op_enable = false;
 			curr_pwr_state = mfd->panel_power_on;
 			mfd->panel_power_on = false;

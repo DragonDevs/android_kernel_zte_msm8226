@@ -128,6 +128,11 @@ static int update_average_load(unsigned int freq, unsigned int cpu)
 
 	cur_load = 100 * (wall_time - idle_time) / wall_time;
 
+	//rms
+	if (0 == freq) {
+		freq = pcpu->policy_max;
+	}
+	//end
 	/* Calculate the scaled load across CPU */
 	load_at_max_freq = (cur_load * freq) / pcpu->policy_max;
 

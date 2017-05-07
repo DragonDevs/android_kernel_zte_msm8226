@@ -63,6 +63,7 @@
 
 uint32_t SMSM_NUM_ENTRIES = 8;
 uint32_t SMSM_NUM_HOSTS = 3;
+unsigned char smd_adsp = 0;
 
 /* Legacy SMSM interrupt notifications */
 #define LEGACY_MODEM_SMSM_MASK (SMSM_RESET | SMSM_INIT | SMSM_SMDINIT \
@@ -554,12 +555,12 @@ static struct edge_to_pid edge_to_pids[] = {
 	[SMD_MODEM_WCNSS] = {SMD_MODEM, SMD_WCNSS},
 	[SMD_QDSP_WCNSS] = {SMD_Q6, SMD_WCNSS},
 	[SMD_DSPS_WCNSS] = {SMD_DSPS, SMD_WCNSS},
-	[SMD_APPS_Q6FW] = {SMD_APPS, SMD_MODEM_Q6_FW},
+	[SMD_APPS_Q6FW] = {SMD_APPS, SMD_MODEM_Q6_FW, "q6fw"},		//zte jiangfeng change
 	[SMD_MODEM_Q6FW] = {SMD_MODEM, SMD_MODEM_Q6_FW},
 	[SMD_QDSP_Q6FW] = {SMD_Q6, SMD_MODEM_Q6_FW},
 	[SMD_DSPS_Q6FW] = {SMD_DSPS, SMD_MODEM_Q6_FW},
 	[SMD_WCNSS_Q6FW] = {SMD_WCNSS, SMD_MODEM_Q6_FW},
-	[SMD_APPS_RPM] = {SMD_APPS, SMD_RPM},
+	[SMD_APPS_RPM] = {SMD_APPS, SMD_RPM, "rpm"},		//zte jiangfeng change
 	[SMD_MODEM_RPM] = {SMD_MODEM, SMD_RPM},
 	[SMD_QDSP_RPM] = {SMD_Q6, SMD_RPM},
 	[SMD_WCNSS_RPM] = {SMD_WCNSS, SMD_RPM},
@@ -1272,6 +1273,15 @@ static void handle_smd_irq_closing_list(void)
 	spin_unlock_irqrestore(&smd_lock, flags);
 }
 
+//zte jiangfeng add		
+extern int zte_smd_wakeup;		//zte jiangfeng
+int zte_qmi_data_wakeup	=	0;		//zte jiangfeng
+int zte_qmi_state_change_wakeup	=	0;		//zte jiangfeng
+extern unsigned char is_qmi_channel(char* channel_name);
+int not_rpm_smd	=	0;
+int rpm_smd_logged	=	0;
+//zte jiangfeng add , end	
+
 static void handle_smd_irq(struct remote_proc_info *r_info,
 		void (*notify)(smd_channel_t *ch))
 {
@@ -1306,6 +1316,23 @@ static void handle_smd_irq(struct remote_proc_info *r_info,
 		if (tmp != ch->last_state) {
 			SMD_POWER_INFO("SMD ch%d '%s' State change %d->%d\n",
 					ch->n, ch->name, ch->last_state, tmp);
+			
+			//zte jiangfeng add
+			if(zte_smd_wakeup	&&	(ch->type != SMD_APPS_RPM || (ch->type == SMD_APPS_RPM && !rpm_smd_logged)))
+			{
+				const char *subsys = smd_edge_to_subsystem(ch->type);
+				printk("%s wakeup app, SMD ch%d '%s' State change %d->%d\n",
+					subsys, ch->n, ch->name, ch->last_state, tmp);
+				if(is_qmi_channel(ch->name))
+				{
+					zte_qmi_state_change_wakeup =	1;
+				}			
+				if(ch->type != SMD_APPS_RPM)
+					not_rpm_smd =	1;
+				else
+					rpm_smd_logged	=1;
+			}
+			//zte jiangfeng add, end
 			smd_state_change(ch, ch->last_state, tmp);
 			state_change = 1;
 		}
@@ -1323,14 +1350,53 @@ static void handle_smd_irq(struct remote_proc_info *r_info,
 				ch->half_ch->get_tail(ch->recv),
 				ch->half_ch->get_head(ch->recv)
 				);
+				
+			//zte jiangfeng add
+			if(zte_smd_wakeup	&&	(ch->type != SMD_APPS_RPM || (ch->type == SMD_APPS_RPM && !rpm_smd_logged)))
+			{
+				const char *subsys = smd_edge_to_subsystem(ch->type);
+				printk("%s wakeup app, SMD ch %d '%s' Data event\n",
+					subsys, ch->n, ch->name);
+				if(is_qmi_channel(ch->name))
+				{
+					zte_qmi_data_wakeup =	1;
+				}
+				if(ch->type != SMD_APPS_RPM)
+					not_rpm_smd =	1;
+				else
+					rpm_smd_logged	=1;
+			}
+			
+			//zte jiangfeng add, end
+			
 			ch->notify(ch->priv, SMD_EVENT_DATA);
 		}
 		if (ch_flags & 0x4 && !state_change) {
 			SMD_POWER_INFO("SMD ch%d '%s' State update\n",
 					ch->n, ch->name);
+			//zte jiangfeng add
+			if(zte_smd_wakeup	&&	(ch->type != SMD_APPS_RPM || (ch->type == SMD_APPS_RPM && !rpm_smd_logged)))
+			{
+				const char *subsys = smd_edge_to_subsystem(ch->type);
+				printk("%s wakeup app, SMD ch %d '%s' State update\n",
+					subsys, ch->n, ch->name);
+				if(ch->type != SMD_APPS_RPM)
+					not_rpm_smd =	1;
+				else
+					rpm_smd_logged	=1;
+			}
+			//zte jiangfeng add, end
 			ch->notify(ch->priv, SMD_EVENT_STATUS);
 		}
 	}
+//zte jiangfeng add
+	if(not_rpm_smd)
+	{
+		zte_smd_wakeup	=	0;
+		rpm_smd_logged 	=	0;		//zte jiangfeng add
+	}
+	not_rpm_smd	=	0;
+//zte jiangfeng add, end
 	spin_unlock_irqrestore(&smd_lock, flags);
 	do_smd_probe(r_info->remote_pid);
 }
@@ -1342,7 +1408,8 @@ static inline void log_irq(uint32_t subsystem)
 	(void) subsys;
 
 	SMD_POWER_INFO("SMD Int %s->Apps\n", subsys);
-}
+	}
+
 
 irqreturn_t smd_modem_irq_handler(int irq, void *data)
 {
@@ -1356,6 +1423,7 @@ irqreturn_t smd_modem_irq_handler(int irq, void *data)
 irqreturn_t smd_dsp_irq_handler(int irq, void *data)
 {
 	log_irq(SMD_APPS_QDSP);
+	smd_adsp = 1;
 	++interrupt_stats[SMD_Q6].smd_in_count;
 	handle_smd_irq(&remote_info[SMD_Q6], notify_dsp_smd);
 	handle_smd_irq_closing_list();
@@ -1911,13 +1979,21 @@ struct smd_channel *smd_get_channel(const char *name, uint32_t type)
 	return NULL;
 }
 
+//zte jiangfeng change
+#if 0
 int smd_named_open_on_edge(const char *name, uint32_t edge,
 			   smd_channel_t **_ch,
 			   void *priv, void (*notify)(void *, unsigned))
+#else
+int smd_named_open_on_edge_zte(const char *name, uint32_t edge,
+			   smd_channel_t **_ch,
+			   void *priv, void (*notify)(void *, unsigned), const char* func, int line)
+#endif
 {
 	struct smd_channel *ch;
 	unsigned long flags;
 
+	printk("%s line %d call %s\n", func, line, __func__);   //zte jiangfeng add
 	if (smd_initialized == 0 && !smd_edge_inited(edge)) {
 		SMD_INFO("smd_open() before smd_init()\n");
 		return -ENODEV;
@@ -1991,9 +2067,12 @@ int smd_named_open_on_edge(const char *name, uint32_t edge,
 
 	return 0;
 }
-EXPORT_SYMBOL(smd_named_open_on_edge);
+//zte jiangfeng change
+//EXPORT_SYMBOL(smd_named_open_on_edge);
+EXPORT_SYMBOL(smd_named_open_on_edge_zte);
+//zte jiangfeng change, end
 
-
+#if 0
 int smd_open(const char *name, smd_channel_t **_ch,
 	     void *priv, void (*notify)(void *, unsigned))
 {
@@ -2001,6 +2080,15 @@ int smd_open(const char *name, smd_channel_t **_ch,
 				      notify);
 }
 EXPORT_SYMBOL(smd_open);
+#else
+int smd_open_zte(const char *name, smd_channel_t **_ch,
+	     void *priv, void (*notify)(void *, unsigned), const char* func, int line)
+{
+	return smd_named_open_on_edge_zte(name, SMD_APPS_MODEM, _ch, priv,
+				      notify,func,line);
+}
+EXPORT_SYMBOL(smd_open_zte);
+#endif
 
 int smd_close(smd_channel_t *ch)
 {
@@ -2431,6 +2519,33 @@ static int smsm_cb_init(void)
 	return ret;
 }
 
+/*
+ * Support for FTM & RECOVERY mode by ZTE_BOOT_JIA_20120529, jia.jia
+ * ZTE_PLATFORM
+ */
+#ifdef ZTE_BOOT_MODE
+static void smem_zte_set_nv_bootmode(int bootmode)
+{
+    int *smem_bootmode = NULL;
+
+    smem_bootmode = (int *)smem_alloc2(SMEM_ID_VENDOR0, sizeof(int));
+
+    if (!smem_bootmode)
+    {
+        pr_err("%s: alloc smem failed!\n", __func__);
+        return;
+    }
+
+    /*
+      * 0: Normal mode
+      * 1: FTM mode
+      */
+    *smem_bootmode = bootmode;
+
+    pr_info("%s: set ftm flag to smem.\n", __func__);
+}
+#endif
+
 static int smsm_init(void)
 {
 	struct smem_shared *shared = (void *) MSM_SHARED_RAM_BASE;
@@ -2517,6 +2632,25 @@ static int smsm_init(void)
 	i = smsm_cb_init();
 	if (i)
 		return i;
+/*
+ * Support for FTM & RECOVERY mode by ZTE_BOOT_JIA_20120529, jia.jia
+ * ZTE_PLATFORM
+ *
+ * 0: Normal mode
+ * 1: FTM mode
+ */
+/*ZTE_BOOT_20130117 huang.yanjun fix bug---->*/
+#ifdef ZTE_BOOT_MODE
+    if (socinfo_get_ftm_flag() == 0)
+    {
+        smem_zte_set_nv_bootmode(MAGIC_NUM_NON_FTM_MODE);
+    }
+    else
+    {
+        smem_zte_set_nv_bootmode(MAGIC_NUM_FTM_MODE);
+    }
+#endif
+/*ZTE_BOOT_20130117 huang.yanjun fix bug <----*/
 
 	wmb();
 

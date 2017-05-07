@@ -41,9 +41,15 @@
 #include <mach/subsystem_restart.h>
 
 #include "smd_private.h"
+#include <mach/msm_smem.h>
 
 static int enable_debug;
 module_param(enable_debug, int, S_IRUGO | S_IWUSR);
+
+
+static int sddump_status = 0;
+module_param(sddump_status, int, S_IRUGO | S_IWUSR);
+
 
 /**
  * enum p_subsys_state - state of a subsystem (private)
@@ -1271,12 +1277,30 @@ static int __init ssr_init_soc_restart_orders(void)
 	return 0;
 }
 
+static int msm_get_sd_dump_status(void)
+{
+    int sd_dump_status = 0;
+    int * zte_smd_ptr = NULL;
+    zte_smd_ptr = (int *)smem_alloc(SMEM_ID_VENDOR1, sizeof(int));
+    if (!zte_smd_ptr)
+    {
+        return 0;
+    }
+    sd_dump_status = *zte_smd_ptr;
+    *zte_smd_ptr = 0;
+
+    return sd_dump_status;
+
+}
+
 static int __init subsys_restart_init(void)
 {
 	int ret;
 
 	ssr_wq = alloc_workqueue("ssr_wq", WQ_CPU_INTENSIVE, 0);
 	BUG_ON(!ssr_wq);
+    sddump_status = msm_get_sd_dump_status();
+    pr_warn("subsys_restart_init msm_get_sd_dump_status : %d\n", sddump_status);
 
 	ret = bus_register(&subsys_bus_type);
 	if (ret)

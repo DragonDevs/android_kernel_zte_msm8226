@@ -132,4 +132,7 @@ source "drivers/staging/ramster/Kconfig"
 
 source "drivers/staging/ozwpan/Kconfig"
 
+#include zte ftm kconfig
+source "drivers/staging/zte_ftm/Kconfig"
+
 endif # STAGING

@@ -426,6 +426,7 @@ static ssize_t store_##file_name					\
 {									\
 	unsigned int ret = -EINVAL;					\
 	struct cpufreq_policy new_policy;				\
+	unsigned int prev_max;						\
 									\
 	ret = cpufreq_get_policy(&new_policy, policy->cpu);		\
 	if (ret)							\
@@ -439,7 +440,10 @@ static ssize_t store_##file_name					\
 	if (ret)							\
 		pr_err("cpufreq: Frequency verification failed\n");	\
 									\
+	prev_max = policy->user_policy.max;                             \
 	policy->user_policy.object = new_policy.object;			\
+	if (policy->user_policy.max != prev_max)                        \
+		printk(KERN_ERR"!!!scaling_max_freq %u->%u!!!", prev_max, policy->user_policy.max); \
 	ret = __cpufreq_set_policy(policy, &new_policy);		\
 									\
 	return ret ? ret : count;					\
@@ -1754,6 +1758,12 @@ static int __cpufreq_set_policy(struct cpufreq_policy *data,
 	/* notification of the new policy */
 	blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
 			CPUFREQ_NOTIFY, policy);
+
+	if (data->max == 300000 || policy->max == 300000){
+		pr_err("new min and max freqs are %u - %u kHz\n",
+					data->max, policy->max);
+		dump_stack();
+	}
 
 	data->min = policy->min;
 	data->max = policy->max;

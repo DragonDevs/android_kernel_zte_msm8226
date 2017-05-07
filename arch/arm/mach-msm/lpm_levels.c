@@ -213,6 +213,8 @@ static int lpm_set_l2_mode(struct lpm_system_state *system_state,
 
 	switch (sleep_mode) {
 	case MSM_SPM_L2_MODE_POWER_COLLAPSE:
+
+		//pr_info("Configuring for L2 power collapse\n"); //ZTE_PM_LHX_20140115 too much logs,cancel
 		msm_pm_set_l2_flush_flag(MSM_SCM_L2_OFF);
 		break;
 	case MSM_SPM_L2_MODE_GDHS:

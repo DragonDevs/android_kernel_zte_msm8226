@@ -530,6 +530,7 @@ config ARCH_MSM8226
 	select MSM_RPM_STATS_LOG
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
 	select ENABLE_VMALLOC_SAVINGS
+	select ZTE_FTM
 
 config ARCH_MSMSAMARIUM
 	bool "MSMSAMARIUM"
@@ -1139,6 +1140,47 @@ config MACH_FSM9XXX_SURF
 	  chipset based SURF evaluation board and
 	  FFA board.
 
+config BOARD_CYGNI
+    depends on ARCH_MSM8226
+    bool "ZTE CYGNI"
+    help
+      Support for ZTE MSM8x26 CYGNI device.
+
+config BOARD_WARP4
+    depends on ARCH_MSM8226
+    bool "ZTE WARP4"
+    help
+      Support for ZTE MSM8x26 WARP4 device.
+
+config BOARD_DRACONIS
+    depends on ARCH_MSM8226
+    bool "ZTE DRACONIS"
+    help
+      Support for ZTE MSM8x26 DRACONIS device.
+
+config BOARD_ERIDANI
+    depends on ARCH_MSM8226
+    bool "ZTE ERIDANI"
+    help
+      Support for ZTE MSM8x26 ERIDANI device.
+
+config BOARD_GRUIS
+    depends on ARCH_MSM8226
+    bool "ZTE GRUIS"
+    help
+      Support for ZTE MSM8x26 GRUIS device.
+
+config BOARD_AQUILAE
+    depends on ARCH_MSM8226
+    bool "ZTE AQUILAE"
+    help
+      Support for ZTE MSM8x26 AQUILAE device.
+
+config BOARD_RF360
+    depends on ARCH_MSM8226
+    bool "ZTE RF360"
+    help
+      Support for ZTE MSM8x26 RF360 device.
 endmenu
 
 config MSM_STACKED_MEMORY
@@ -3013,6 +3055,14 @@ config MSM_BOOT_STATS
 	 display init, total boot time.
 	 This figures are reported in mpm sleep clock cycles and have a
 	 resolution of 31 bits as 1 bit is used as an overflow check.
+
+config ZTE_PIL_AUTH_ERROR_DETECTION
+	depends on ARCH_MSM8226
+	bool "PIL AUTH ERROR DETECTION"
+	default n
+	help
+	  When authorization of PIL images is failed, the system
+	  will enter into UNAUTH mode to show related error message.
 
 config MSM_XPU_ERR_FATAL
 	bool "Configure XPU violations as fatal errors"

@@ -346,6 +346,18 @@ err_prepare_depends:
 	goto out;
 }
 EXPORT_SYMBOL(clk_prepare);
+#define ZTE_CLK_DEBUG //ZTE_PM_LHX_20140115 add to identify who enable/disable clks
+/*
+How to debug?
+first 
+echo -n "clkname" > /sys/module/clock/parameters/clk_debug
+then cat /proc/kmsg 
+echo -n "NULL" to cancel debug
+*/
+#ifdef ZTE_CLK_DEBUG
+char *clk_debug_zte;
+module_param_named(clk_debug, clk_debug_zte, charp, 0600);
+#endif
 
 /*
  * Standard clock functions defined in include/linux/clk.h
@@ -363,6 +375,14 @@ int clk_enable(struct clk *clk)
 		return -EINVAL;
 
 	spin_lock_irqsave(&clk->lock, flags);
+	#ifdef ZTE_CLK_DEBUG
+	if(clk_debug_zte)
+	{
+//		printk("zte_clk %test\n",clk_debug_zte);
+		if (strstr(clk->dbg_name,clk_debug_zte))
+			WARN(1,"ZTE_PM_CLK enable  clocks: %s:   clk->count = %d\n", clk->dbg_name,clk->count);
+	}
+	#endif
 	WARN(!clk->prepare_count,
 			"%s: Don't call enable on unprepared clocks\n", name);
 	if (clk->count == 0) {
@@ -405,6 +425,13 @@ void clk_disable(struct clk *clk)
 		return;
 
 	spin_lock_irqsave(&clk->lock, flags);
+	#ifdef ZTE_CLK_DEBUG
+	if(clk_debug_zte)
+	{
+		if (strstr(clk->dbg_name,clk_debug_zte))
+			WARN(1,"ZTE_PM_CLK disable  clocks: %s:   clk->count = %d\n", clk->dbg_name,clk->count);
+	}
+	#endif
 	WARN(!clk->prepare_count,
 			"%s: Never called prepare or calling disable after unprepare\n",
 			name);

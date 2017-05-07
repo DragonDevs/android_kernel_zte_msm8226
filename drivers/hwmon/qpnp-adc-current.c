@@ -1469,9 +1469,9 @@ static int __devinit qpnp_iadc_probe(struct spmi_device *spmi)
 	rc = of_property_read_u32(node, "qcom,rsense",
 			&iadc->rsense);
 	if (rc)
-		pr_debug("Defaulting to internal rsense\n");
+		pr_info("%s:Defaulting to internal rsense\n",__func__);
 	else {
-		pr_debug("Use external rsense\n");
+		pr_info("%s:Use external rsense,val=%d\n",__func__,iadc->rsense);
 		iadc->external_rsense = true;
 	}
 

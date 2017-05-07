@@ -126,6 +126,10 @@ struct spi_ioc_transfer {
 #define SPI_IOC_RD_MAX_SPEED_HZ		_IOR(SPI_IOC_MAGIC, 4, __u32)
 #define SPI_IOC_WR_MAX_SPEED_HZ		_IOW(SPI_IOC_MAGIC, 4, __u32)
 
+/* Lattice TX/RX mode */
+#define SPI_IOC_LATTICE_RX_MODE			_IOR(SPI_IOC_MAGIC, 9, __u8)
+#define SPI_IOC_LATTICE_TX_MODE			_IOW(SPI_IOC_MAGIC, 9, __u8)
 
+#define ICE40_IOCTL_CMD_POWER_CTRL		_IOW(SPI_IOC_MAGIC, 10, __u32)
 
 #endif /* SPIDEV_H */

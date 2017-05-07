@@ -882,8 +882,13 @@ static int32_t qpnp_adc_tm_configure(struct qpnp_adc_tm_chip *chip,
 	}
 
 	/* Hardware setting time */
+#if 1//zte,change 0x0 to 0xf,let hw settle delay as long as possible
 	rc = qpnp_adc_tm_write_reg(chip, QPNP_HW_SETTLE_DELAY,
 					chan_prop->hw_settle_time);
+#else
+	rc = qpnp_adc_tm_write_reg(chip, QPNP_HW_SETTLE_DELAY,
+					0xF);
+#endif
 	if (rc < 0) {
 		pr_err("adc-tm hw settling time setup err\n");
 		return rc;
@@ -1235,6 +1240,7 @@ static void notify_battery_therm(struct qpnp_adc_tm_sensor *adc_tm)
 		/* Batt therm's warm temperature translates to low voltage */
 		if (client_info->notify_low_thr) {
 			/* HIGH_STATE = WARM_TEMP for battery client */
+			pr_info("notify with warm state, calling %pf\n",client_info->btm_param->threshold_notification);
 			client_info->btm_param->threshold_notification(
 			ADC_TM_WARM_STATE, client_info->btm_param->btm_ctx);
 			client_info->notify_low_thr = false;
@@ -1243,6 +1249,7 @@ static void notify_battery_therm(struct qpnp_adc_tm_sensor *adc_tm)
 		/* Batt therm's cool temperature translates to high voltage */
 		if (client_info->notify_high_thr) {
 			/* LOW_STATE = COOL_TEMP for battery client */
+			pr_info("notify with cool state, calling %pf\n",client_info->btm_param->threshold_notification);
 			client_info->btm_param->threshold_notification(
 			ADC_TM_COOL_STATE, client_info->btm_param->btm_ctx);
 			client_info->notify_high_thr = false;
@@ -1263,6 +1270,7 @@ static void notify_clients(struct qpnp_adc_tm_sensor *adc_tm)
 			if (client_info->btm_param->threshold_notification
 								!= NULL) {
 				pr_debug("notify kernel with low state\n");
+				pr_info("notify with low state,calling %pf\n",client_info->btm_param->threshold_notification);
 				client_info->btm_param->threshold_notification(
 					ADC_TM_LOW_STATE,
 					client_info->btm_param->btm_ctx);
@@ -1274,6 +1282,7 @@ static void notify_clients(struct qpnp_adc_tm_sensor *adc_tm)
 			if (client_info->btm_param->threshold_notification
 								!= NULL) {
 				pr_debug("notify kernel with high state\n");
+				pr_info("notify with high state,calling %pf\n",client_info->btm_param->threshold_notification);
 				client_info->btm_param->threshold_notification(
 					ADC_TM_HIGH_STATE,
 					client_info->btm_param->btm_ctx);

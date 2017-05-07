@@ -49,7 +49,7 @@
 #define EXT_CLASS_D_DIS_DELAY 3000
 #define EXT_CLASS_D_DELAY_DELTA 2000
 
-#define WCD9XXX_MBHC_DEF_BUTTONS 8
+#define WCD9XXX_MBHC_DEF_BUTTONS 3 // chenjun:orig:8->3
 #define WCD9XXX_MBHC_DEF_RLOADS 5
 #define TAPAN_EXT_CLK_RATE 9600000
 
@@ -58,6 +58,9 @@
 #define LO_1_SPK_AMP   0x1
 #define LO_2_SPK_AMP   0x2
 
+// weizhijun:gpio 51 and 52 are used for speaker ext
+#define EXT_SPKR_EN0_GPIO 51
+#define EXT_SPKR_EN1_GPIO 52
 #define ADSP_STATE_READY_TIMEOUT_MS 3000
 
 static void *adsp_state_notifier;
@@ -95,9 +98,11 @@ static struct wcd9xxx_mbhc_config mbhc_cfg = {
 	.micbias_enable_flags = 1 << MBHC_MICBIAS_ENABLE_THRESHOLD_HEADSET,
 	.insert_detect = true,
 	.swap_gnd_mic = NULL,
+#if 0 // chenjun:do NOT use CS
 	.cs_enable_flags = (1 << MBHC_CS_ENABLE_POLLING |
 			    1 << MBHC_CS_ENABLE_INSERTION |
 			    1 << MBHC_CS_ENABLE_REMOVAL),
+#endif
 	.do_recalibration = true,
 	.use_vddio_meas = true,
 };
@@ -245,12 +250,18 @@ static int msm8226_mclk_event(struct snd_soc_dapm_widget *w,
 static void msm8226_ext_spk_power_amp_enable(u32 enable)
 {
 	if (enable) {
-		gpio_direction_output(ext_spk_amp_gpio, enable);
+		//gpio_direction_output(ext_spk_amp_gpio, enable);
+		gpio_direction_output(EXT_SPKR_EN0_GPIO, enable);
+		gpio_direction_output(EXT_SPKR_EN1_GPIO, enable);
+		pr_err("%s: enable = %d\n", __func__, enable);
 		/* time takes enable the external power amplifier */
 		usleep_range(EXT_CLASS_D_EN_DELAY,
 			EXT_CLASS_D_EN_DELAY + EXT_CLASS_D_DELAY_DELTA);
 	} else {
-		gpio_direction_output(ext_spk_amp_gpio, enable);
+		//gpio_direction_output(ext_spk_amp_gpio, enable);
+		gpio_direction_output(EXT_SPKR_EN0_GPIO, enable);
+		gpio_direction_output(EXT_SPKR_EN1_GPIO, enable);
+		pr_err("%s: enable = %d\n", __func__, enable);
 		/* time takes disable the external power amplifier */
 		usleep_range(EXT_CLASS_D_DIS_DELAY,
 			EXT_CLASS_D_DIS_DELAY + EXT_CLASS_D_DELAY_DELTA);
@@ -262,7 +273,8 @@ static void msm8226_ext_spk_power_amp_enable(u32 enable)
 
 static void msm8226_ext_spk_power_amp_on(u32 spk)
 {
-	if (gpio_is_valid(ext_spk_amp_gpio)) {
+	//if (gpio_is_valid(ext_spk_amp_gpio)) {
+	if (1) {
 		if (spk & (LO_1_SPK_AMP | LO_2_SPK_AMP)) {
 			pr_debug("%s:Enable left and right speakers case spk = 0x%x\n",
 				__func__, spk);
@@ -270,11 +282,12 @@ static void msm8226_ext_spk_power_amp_on(u32 spk)
 			msm8226_ext_spk_pamp |= spk;
 
 			if ((msm8226_ext_spk_pamp & LO_1_SPK_AMP) &&
-				(msm8226_ext_spk_pamp & LO_2_SPK_AMP))
-				if (ext_spk_amp_gpio >= 0) {
+				(msm8226_ext_spk_pamp & LO_2_SPK_AMP)) {
+				//if (ext_spk_amp_gpio >= 0) {
 					pr_debug("%s  enable power", __func__);
 					msm8226_ext_spk_power_amp_enable(1);
-				}
+				//}
+			}
 		} else  {
 			pr_err("%s: Invalid external speaker ampl. spk = 0x%x\n",
 				__func__, spk);
@@ -284,7 +297,8 @@ static void msm8226_ext_spk_power_amp_on(u32 spk)
 
 static void msm8226_ext_spk_power_amp_off(u32 spk)
 {
-	if (gpio_is_valid(ext_spk_amp_gpio)) {
+	//if (gpio_is_valid(ext_spk_amp_gpio)) {
+	if (1) {
 		if (spk & (LO_1_SPK_AMP | LO_2_SPK_AMP)) {
 			pr_debug("%s Disable left and right speakers case spk = 0x%08x",
 				__func__, spk);
@@ -292,10 +306,10 @@ static void msm8226_ext_spk_power_amp_off(u32 spk)
 			msm8226_ext_spk_pamp &= ~spk;
 
 			if (!msm8226_ext_spk_pamp) {
-				if (ext_spk_amp_gpio >= 0) {
+				//if (ext_spk_amp_gpio >= 0) {
 					pr_debug("%s  disable power", __func__);
 					msm8226_ext_spk_power_amp_enable(0);
-				}
+				//}
 				msm8226_ext_spk_pamp = 0;
 			}
 		 } else  {
@@ -308,8 +322,8 @@ static void msm8226_ext_spk_power_amp_off(u32 spk)
 static int msm8226_ext_spkramp_event(struct snd_soc_dapm_widget *w,
 			struct snd_kcontrol *k, int event)
 {
-	pr_debug("%s()\n", __func__);
-
+	//pr_debug("%s()\n", __func__);
+	pr_err("weizhijun %s %s\n", __func__, w->name);
 	if (SND_SOC_DAPM_EVENT_ON(event)) {
 		if (!strncmp(w->name, "Lineout_1 amp", 14))
 			msm8226_ext_spk_power_amp_on(LO_1_SPK_AMP);
@@ -365,6 +379,10 @@ static const struct snd_soc_dapm_widget msm8226_dapm_widgets[] = {
 	msm8226_mclk_event, SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_MIC("Handset Mic", NULL),
+/* ZTE_chenjun_20140228, start */
+// add Fluence Mic
+	SND_SOC_DAPM_MIC("Fluence Mic", NULL),
+/* ZTE_chenjun_20140228, end */
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("ANCRight Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("ANCLeft Headset Mic", NULL),
@@ -1065,12 +1083,12 @@ void *def_tapan_mbhc_cal(void)
 	S(mic_current, TAPAN_PID_MIC_5_UA);
 	S(hph_current, TAPAN_PID_MIC_5_UA);
 	S(t_mic_pid, 100);
-	S(t_ins_complete, 250);
+	S(t_ins_complete, 1000); // chenjun:orig:250
 	S(t_ins_retry, 200);
 #undef S
 #define S(X, Y) ((WCD9XXX_MBHC_CAL_PLUG_TYPE_PTR(tapan_cal)->X) = (Y))
-	S(v_no_mic, 30);
-	S(v_hs_max, 2450);
+	S(v_no_mic, 230); // chenjun:orig:30->398(@1.8V)->686(@2.7V)
+	S(v_hs_max, 2850); // chenjun:orig:2400->1650(@1.8V)
 #undef S
 #define S(X, Y) ((WCD9XXX_MBHC_CAL_BTN_DET_PTR(tapan_cal)->X) = (Y))
 	S(c[0], 62);
@@ -1088,6 +1106,15 @@ void *def_tapan_mbhc_cal(void)
 	btn_low = wcd9xxx_mbhc_cal_btn_det_mp(btn_cfg, MBHC_BTN_DET_V_BTN_LOW);
 	btn_high = wcd9xxx_mbhc_cal_btn_det_mp(btn_cfg,
 					       MBHC_BTN_DET_V_BTN_HIGH);
+#if 1
+// chenjun:ZTE 3 buttons headset
+	btn_low[0] = -50;
+	btn_high[0] = 159;
+	btn_low[1] = 160;
+	btn_high[1] = 312;
+	btn_low[2] = 313;
+	btn_high[2] = 639;
+#else	
 	btn_low[0] = -50;
 	btn_high[0] = 20;
 	btn_low[1] = 21;
@@ -1104,6 +1131,7 @@ void *def_tapan_mbhc_cal(void)
 	btn_high[6] = 269;
 	btn_low[7] = 270;
 	btn_high[7] = 500;
+#endif
 	n_ready = wcd9xxx_mbhc_cal_btn_det_mp(btn_cfg, MBHC_BTN_DET_N_READY);
 	n_ready[0] = 80;
 	n_ready[1] = 12;
@@ -2225,6 +2253,24 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		}
 	}
 
+	ret = gpio_request(EXT_SPKR_EN0_GPIO,"TAPAN_CODEC_LINEOUT1_SPKR");
+	if (ret) {
+		/* GPIO to enable EXT SPK exists, but failed request */
+		dev_err(card->dev,
+			"%s: Failed to request tapan lineout1 spkr gpio %d\n",
+			__func__, EXT_SPKR_EN0_GPIO);
+		goto err_lineout1_spkr;
+	}
+	gpio_direction_output(EXT_SPKR_EN0_GPIO, 0);
+	ret = gpio_request(EXT_SPKR_EN1_GPIO,"TAPAN_CODEC_LINEOUT2_SPKR");
+	if (ret) {
+		/* GPIO to enable EXT SPK exists, but failed request */
+		dev_err(card->dev,
+			"%s: Failed to request tapan lineout2 spkr gpio %d\n",
+			__func__, EXT_SPKR_EN1_GPIO);
+		goto err_lineout2_spkr;
+	}
+	gpio_direction_output(EXT_SPKR_EN1_GPIO, 0);
 	msm8226_setup_hs_jack(pdev, pdata);
 
 	ret = of_property_read_string(pdev->dev.of_node,
@@ -2264,7 +2310,10 @@ err_vdd_spkr:
 		gpio_free(vdd_spkr_gpio);
 		vdd_spkr_gpio = -1;
 	}
-
+err_lineout1_spkr:
+	gpio_free(EXT_SPKR_EN0_GPIO);
+err_lineout2_spkr:
+	gpio_free(EXT_SPKR_EN1_GPIO);
 err:
 	if (pdata->mclk_gpio > 0) {
 		dev_dbg(&pdev->dev, "%s free gpio %d\n",
@@ -2289,6 +2338,9 @@ static int __devexit msm8226_asoc_machine_remove(struct platform_device *pdev)
 		gpio_free(ext_spk_amp_gpio);
 	if (pdata->us_euro_gpio > 0)
 		gpio_free(pdata->us_euro_gpio);
+
+	gpio_free(EXT_SPKR_EN0_GPIO);
+	gpio_free(EXT_SPKR_EN1_GPIO);
 
 	vdd_spkr_gpio = -1;
 	ext_spk_amp_gpio = -1;

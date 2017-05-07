@@ -43,9 +43,10 @@ static struct device_attribute power_supply_attrs[];
 static ssize_t power_supply_show_property(struct device *dev,
 					  struct device_attribute *attr,
 					  char *buf) {
+	//zte add BMS and wireless according to the type enum in power_supply.h
 	static char *type_text[] = {
 		"Unknown", "Battery", "UPS", "Mains", "USB",
-		"USB_DCP", "USB_CDP", "USB_ACA"
+		"USB_DCP", "USB_CDP", "USB_ACA", "BMS", "Wireless"
 	};
 	static char *status_text[] = {
 		"Unknown", "Charging", "Discharging", "Not charging", "Full"

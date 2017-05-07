@@ -1689,6 +1689,9 @@ static ssize_t dynamic_fps_sysfs_rda_dfps(struct device *dev,
 		pr_err("no panel connected for fb%d\n", mfd->index);
 		return -ENODEV;
 	}
+	if (!pdata->panel_info.dynamic_fps) {
+		return 0;
+	}
 
 	ret = snprintf(buf, PAGE_SIZE, "%d\n",
 		       pdata->panel_info.mipi.frame_rate);
@@ -1721,7 +1724,11 @@ static ssize_t dynamic_fps_sysfs_wta_dfps(struct device *dev,
 		pr_err("no panel connected for fb%d\n", mfd->index);
 		return -ENODEV;
 	}
-
+	if (!pdata->panel_info.dynamic_fps) {
+		pr_debug("%s: not support dynamic fps %d\n",
+			 __func__, dfps);
+		return -ENODEV;
+	}
 	if (dfps == pdata->panel_info.mipi.frame_rate) {
 		pr_debug("%s: FPS is already %d\n",
 			__func__, dfps);

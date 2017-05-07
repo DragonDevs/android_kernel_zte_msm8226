@@ -466,6 +466,11 @@ static int ext4_has_free_clusters(struct ext4_sb_info *sbi,
 	    capable(CAP_SYS_RESOURCE) ||
 		(flags & EXT4_MB_USE_ROOT_BLOCKS)) {
 
+		if ((sbi->s_resgid != 0) && in_group_p(sbi->s_resgid)){
+			if (free_clusters < ((root_clusters/2 + nclusters) + dirty_clusters))
+				return 0;
+		}
+
 		if (free_clusters >= (nclusters + dirty_clusters))
 			return 1;
 	}

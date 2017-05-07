@@ -242,6 +242,16 @@ static struct wcnss_pmic_dump wcnss_pmic_reg_dump[] = {
 
 #define NVBIN_FILE "wlan/prima/WCNSS_qcom_wlan_nv.bin"
 
+#define NVBIN_FILE_PERSIST "wlan/prima/WCNSS_qcom_wlan_nv_persist.bin"
+int wlan_use_persist_nv_file = 0;
+EXPORT_SYMBOL(wlan_use_persist_nv_file);
+
+#ifdef WLAN_BIN_COMPATIBLE
+#define NVBIN_FILE_SECOND "wlan/prima/WCNSS_qcom_wlan_nv_2.bin"
+extern uint8_t read_zte_hw_ver_byte(void);
+uint8_t wlan_hw_ver = 0;
+EXPORT_SYMBOL(wlan_hw_ver);
+#endif
 /*
  * On SMD channel 4K of maximum data can be transferred, including message
  * header, so NV fragment size as next multiple of 1Kb is 3Kb.
@@ -1802,6 +1812,25 @@ static void wcnss_send_version_req(struct work_struct *worker)
 
 static DECLARE_RWSEM(wcnss_pm_sem);
 
+#ifdef WLAN_BIN_COMPATIBLE
+static int wcnss_get_firmware_nv_file(uint8_t vHardwareID, char *pfileName)
+{
+	char *mWlanNVFile = NVBIN_FILE;
+	printk("%s: vHardwareID = %d\n", __func__, vHardwareID);
+
+	if (vHardwareID == 0x01) {
+		mWlanNVFile = NVBIN_FILE;
+	} else if (vHardwareID == 0x02) {
+		mWlanNVFile = NVBIN_FILE_SECOND;
+	} else {
+		mWlanNVFile = NVBIN_FILE;
+	}
+	strcpy(pfileName, mWlanNVFile);
+	printk("%s: pfileName = %s\n", __func__, pfileName);
+	return 0;
+}
+#endif
+
 static void wcnss_nvbin_dnld(void)
 {
 	int ret = 0;
@@ -1816,14 +1845,30 @@ static void wcnss_nvbin_dnld(void)
 	const struct firmware *nv = NULL;
 	struct device *dev = &penv->pdev->dev;
 
+	char mWcnssNVFile[100] = NVBIN_FILE;
+#ifdef WLAN_BIN_COMPATIBLE
+	wlan_hw_ver = read_zte_hw_ver_byte();
+	wcnss_get_firmware_nv_file(wlan_hw_ver, mWcnssNVFile);
+#endif
 	down_read(&wcnss_pm_sem);
 
-	ret = request_firmware(&nv, NVBIN_FILE, dev);
+	ret = request_firmware(&nv, NVBIN_FILE_PERSIST, dev);
 
 	if (ret || !nv || !nv->data || !nv->size) {
 		pr_err("wcnss: %s: request_firmware failed for %s\n",
-			__func__, NVBIN_FILE);
-		goto out;
+			__func__, NVBIN_FILE_PERSIST);
+		ret = request_firmware(&nv, mWcnssNVFile, dev);
+
+		if (ret || !nv || !nv->data || !nv->size) {
+			pr_err("wcnss: %s: request_firmware failed for %s\n",
+				__func__, mWcnssNVFile);
+			goto out;
+		} else {
+			printk("%s, wcnss will use %s\n", __func__, mWcnssNVFile);
+		}
+	} else {
+		printk("%s, wcnss will use %s\n", __func__, NVBIN_FILE_PERSIST);
+		wlan_use_persist_nv_file = 1;
 	}
 
 	/*
