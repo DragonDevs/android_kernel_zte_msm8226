@@ -129,10 +129,10 @@ static DEFINE_SPINLOCK(reg_spinlock);
 #define WCNSS_TSTBUS_CTRL_WRFIFO	(0x04 << 1)
 #define WCNSS_TSTBUS_CTRL_RDFIFO	(0x05 << 1)
 #define WCNSS_TSTBUS_CTRL_CTRL		(0x07 << 1)
-#define WCNSS_TSTBUS_CTRL_AXIM_CFG0	(0x00 << 6)
-#define WCNSS_TSTBUS_CTRL_AXIM_CFG1	(0x01 << 6)
-#define WCNSS_TSTBUS_CTRL_CTRL_CFG0	(0x00 << 12)
-#define WCNSS_TSTBUS_CTRL_CTRL_CFG1	(0x01 << 12)
+#define WCNSS_TSTBUS_CTRL_AXIM_CFG0	(0x00 << 8)
+#define WCNSS_TSTBUS_CTRL_AXIM_CFG1	(0x01 << 8)
+#define WCNSS_TSTBUS_CTRL_CTRL_CFG0	(0x00 << 28)
+#define WCNSS_TSTBUS_CTRL_CTRL_CFG1	(0x01 << 28)
 
 #define MSM_PRONTO_CCPU_BASE			0xfb205050
 #define CCU_PRONTO_INVALID_ADDR_OFFSET		0x08
@@ -238,6 +238,13 @@ static struct wcnss_pmic_dump wcnss_pmic_reg_dump[] = {
 	{"S4", 0x1E8},
 	{"LVS7", 0x06C},
 	{"LVS1", 0x060},
+};
+
+static int wcnss_notif_cb(struct notifier_block *this, unsigned long code,
+				void *ss_handle);
+
+static struct notifier_block wnb = {
+	.notifier_call = wcnss_notif_cb,
 };
 
 #define NVBIN_FILE "wlan/prima/WCNSS_qcom_wlan_nv.bin"
@@ -2401,6 +2408,9 @@ wcnss_trigger_config(struct platform_device *pdev)
 
 	if (pil_retry >= WCNSS_MAX_PIL_RETRY) {
 		wcnss_reset_intr();
+		if (penv->wcnss_notif_hdle)
+			subsys_notif_unregister_notifier(penv->wcnss_notif_hdle,
+				&wnb);
 		penv->pil = NULL;
 		goto fail_pil;
 	}
@@ -2593,11 +2603,6 @@ static int wcnss_notif_cb(struct notifier_block *this, unsigned long code,
 
 	return NOTIFY_DONE;
 }
-
-static struct notifier_block wnb = {
-	.notifier_call = wcnss_notif_cb,
-};
-
 
 static const struct file_operations wcnss_node_fops = {
 	.owner = THIS_MODULE,
