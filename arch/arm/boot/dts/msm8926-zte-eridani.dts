@@ -18,6 +18,9 @@
 /include/ "msm8926-zte-eridani.dtsi"
 /include/ "dsi-panel-zte-lead-hsd-otm9608-qhd-video.dtsi"
 /include/ "dsi-panel-zte-yushun-lg-nt35516-qhd-video.dtsi"
+/include/ "dsi-panel-zte-lead-hsd-otm9608-qhd-cmd.dtsi"
+/include/ "dsi-panel-zte-yushun-lg-nt35516-qhd-cmd.dtsi"
+/include/ "dsi-panel-zte-yushun-lg-nt35517-qhd-video.dtsi"  //added by tang in 8/19/2014 for P892U12.
 
 / {
 	model = "ZTE MSM 8926 ERIDANI";
@@ -36,4 +39,5 @@
 };
 &pm8226_chg {
 	qcom,ext-ovp-present;
+	qcom,ibatmax-ma = <1100>;
 };

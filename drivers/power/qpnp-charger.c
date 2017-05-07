@@ -1998,6 +1998,8 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 		chip->usb_present = usb_present;
 		wake_lock_timeout(&chip->charger_wake_lock, 5 * HZ);	//zte add
 		if (!usb_present) {
+			if (ext_ovp_present && socinfo_get_ftm_flag())
+				zte_ext_ovp_disable();							//zte jiangfeng add for A64
 			/* when a valid charger inserted, and increase the
 			 *  charger voltage to OVP threshold, then
 			 *  usb_in_valid falling edge interrupt triggers.
@@ -2033,6 +2035,8 @@ qpnp_chg_usb_usbin_valid_irq_handler(int irq, void *_chip)
 			chip->aicl_settled = false;
 			wake_unlock(&chip->charger_fulled_lock);	//zte add
 		} else {
+			if (ext_ovp_present && socinfo_get_ftm_flag())
+				zte_ext_ovp_enable();							//zte jiangfeng add for A64
 		        wake_lock(&chip->charger_fulled_lock);		//zte add
 			/* when OVP clamped usbin, and then decrease
 			 * the charger voltage to lower than the OVP
@@ -2639,6 +2643,7 @@ static char *pm_batt_supplied_to[] = {
 static int charger_monitor;
 module_param(charger_monitor, int, 0644);
 
+
 #define OVP_USB_WALL_TRSH_MA	200
 static int
 qpnp_power_get_property_mains(struct power_supply *psy,
@@ -3062,7 +3067,7 @@ qpnp_batt_external_power_changed(struct power_supply *psy)
 		chip->prev_usb_max_ma = ret.intval;
 
 		/*ZTE: Add for power on by charger without battery*/
-		if (!get_prop_batt_present(chip)) {
+		if (!get_prop_batt_present(chip) && (!socinfo_get_ftm_flag()) ) {
 			pr_info("batt not present and ret,intval=%d,return\n",ret.intval);
 			return;
 		}

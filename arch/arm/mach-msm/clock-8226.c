@@ -3426,7 +3426,9 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "1.qcom,camera"),//add for ov8835 by CDZ_CAM_ZTE
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "2.qcom,camera"),//add for ov9760 by YCM_CAM_ZTE
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "3.qcom,camera"),//add for ov5648 by CDZ_CAM_ZTE
-	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "4.qcom,camera"),//add for IMX135 by CDZ_CAM_ZTE 
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "4.qcom,camera"),//add for IMX135 by CDZ_CAM_ZTE
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "5.qcom,camera"),//add for imx219 by fengya@20140818	
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6.qcom,camera"),//add for ov2680 by fengya@20140818	
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6f.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "90.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6d.qcom,camera"),
@@ -3437,6 +3439,8 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "2.qcom,camera"),//add for ov9760 by YCM_CAM_ZTE
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "3.qcom,camera"),//add for ov5648 by CDZ_CAM_ZTE
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "4.qcom,camera"),//add for IMX135 by CDZ_CAM_ZTE 
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "5.qcom,camera"),//add for imx219 by fengya@20140818	
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6.qcom,camera"),//add for ov2680 by fengya@20140818	
 	/* eeprom clocks */
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,eeprom"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,eeprom"),

@@ -2670,6 +2670,7 @@ void zte_synaptics_change_fw_config( struct synaptics_rmi4_data *ts )//xym
 	uint8_t ecw_data2[1]={0x00};//F11_2D_CTRL48
 	uint8_t ecw_data3[7]={0x8d,0x8d,0x8d,0x8d,
 							0x8d,0x8d,0x8d};//F55_SENSOR_CTRL05
+	uint8_t junda_data0[2]={0xc4,0x09};//xym 20140808
 	if(ts->config_id.sensor==0x39)//ECW
 	{
 		int retval=0;
@@ -2692,33 +2693,84 @@ void zte_synaptics_change_fw_config( struct synaptics_rmi4_data *ts )//xym
 		
 		i2c_smbus_write_byte_data(ts->i2c_client,0xff,0); 		
 	}
-#elif defined(CONFIG_BOARD_CYGNI)
-     uint8_t junda_data0[3] = {0xae,0x07,0x8f};//Small Z Scale Factor
-     uint8_t junda_data1[1] = {0x00};//Tx Clip MSB
-     uint8_t junda_data2[1] = {0x05};//Land/Lift Control 
-     uint8_t junda_data3[1] = {0xb8};//large object size 
+	else if(ts->config_id.sensor==0x45)//junda
+	{
+		int retval=0;
+		printk("%s: xym, change the junda fw config!\n", __func__); 
 
-     int retval=0;
-     if(ts->config_id.sensor==0x45)//junda
-     {
-     	
-     	printk("%s: xym, change the junda fw config!\n", __func__); 
-     
-     	retval=synaptics_rmi4_i2c_write(ts,0x6c,junda_data0,3); 
-     	if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 85\n", __func__);
-     	
-     	synaptics_rmi4_i2c_write(ts,0x82,junda_data1,1); 
-     	if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 82\n", __func__);	
-     	
-     	synaptics_rmi4_i2c_write(ts,0x8a,junda_data2,1); 
-     	if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 8a\n", __func__);	
-          	
-     	synaptics_rmi4_i2c_write(ts,0x85,junda_data3,1); 
-     	if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 85\n", __func__);	
-
-     }
-
+		printk("junda current fw:0x%x\n",ts->config_id.fw_ver);
+		if(ts->config_id.fw_ver==0x4130){
+			printk("junda change the config\n");
+			retval=synaptics_rmi4_i2c_write(ts,0x5f,junda_data0,2); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 5f\n", __func__);
+		}
+	}
+#elif defined CONFIG_BOARD_CYGNI
+		uint8_t junda_data0[4] = {0xca,0x07,0x96,0x01};//F11_2D_CTRL32-33
+		uint8_t junda_data1[4] = {0x06,0xcd,0xf6,0xd7};//F11_2D_CTRL42-43
+		uint8_t junda_data2[1] = {0x05};//F11_2D_CTRL90_00_00
+		uint8_t junda_data3[2] = {0xa0,0x0f};//F54_ANALOG_CTRL21_00 
+		uint8_t junda_data4[2] = {0xc8,0x00};//F54_ANALOG_CTRL24_00
+		uint8_t junda_data5[4] = {0xff,0xcd,0xd0,0x07};// F54_ANALOG_CTRL26 -28
+		uint8_t junda_data6[1] = {0x02};// F54_ANALOG_CTRL04
+		uint8_t junda_data7[1] = {0x4b};// F54_ANALOG_CTRL08_00
+		uint8_t junda_data8[24] = {0x80,0x60,0x60,0x60,0x60,0x60,0x60,0x60,0x34,0x33,0x32,0x30,
+			0x2f,0x2d,0x2c,0x2a,0x00,0x00,0x00,0x00,0x00,0x02,0x05,0x08};// F54_ANALOG_CTRL17	18 19
+		uint8_t junda_data9[24] = {0x02,0x02,0x02,0x02,0x05,0x02,0x03,0x0b,0x10,0x10,0x10,0x10,
+			0x40,0x10,0x20,0x70,0x39,0x3b,0x3d,0x3f,0x68,0x43,0x5c,0x5b};//F54_ANALOG_CTRL38 39 40
+		uint8_t junda_data10[8] = {0x01,0x04,0x08,0x0c,0x10,0x12,0x13,0x15};// F54_ANALOG_CTRL75
+		uint8_t force_update;
+		int retval=0;
+		if(ts->config_id.sensor==0x45)//junda
+		{
+			
+			printk("%s: xym, change the junda fw config!\n", __func__); 
+	
+			retval=synaptics_rmi4_i2c_write(ts,0x6c,junda_data0,4); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 85\n", __func__);
+			
+			synaptics_rmi4_i2c_write(ts,0x79,junda_data1,4); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 7f\n", __func__);	
+			
+			synaptics_rmi4_i2c_write(ts,0x8a,junda_data2,1); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 7f\n", __func__);	
+	
+			i2c_smbus_write_byte_data(ts->i2c_client,0xff,1);// change to page 1.
+			
+			synaptics_rmi4_i2c_write(ts,0x137,junda_data3,2); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+			
+			synaptics_rmi4_i2c_write(ts,0x13c,junda_data4,2); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+	
+			synaptics_rmi4_i2c_write(ts,0x13f,junda_data5,4); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+			
+			synaptics_rmi4_i2c_write(ts,0x112,junda_data6,1); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+			
+			synaptics_rmi4_i2c_write(ts,0x116,junda_data7,1); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);
+			
+			synaptics_rmi4_i2c_write(ts,0x11e,junda_data8,24); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+			
+			synaptics_rmi4_i2c_write(ts,0x146,junda_data9,24); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+			
+			synaptics_rmi4_i2c_write(ts,0x165,junda_data10,8); 
+			if (retval < 0) dev_err(&(ts->input_dev->dev), "%s: Failed to write 303\n", __func__);	
+	
+			synaptics_rmi4_i2c_read(ts,0x172,&force_update,1);
+			force_update=force_update|0x04;
+			synaptics_rmi4_i2c_write(ts,0x172,&force_update,1);//force update page 1,
+	
+			i2c_smbus_write_byte_data(ts->i2c_client,0xff,0); 
+	
+		}
+	
 #endif
+
 
 }
 
@@ -2935,6 +2987,17 @@ static int  synaptics_rmi4_probe(struct i2c_client *client,
 
 	rmi4_data->sensor_max_y = rmi4_data->sensor_max_y - rmi4_data->board->maxy_offset;
 
+	#ifdef CONFIG_BOARD_ERIDANI
+	if(rmi4_data->config_id.sensor==0x45)//junda	
+	{
+		if(fw_ver==0x4130){
+			printk("change the junda sensor_max_y\n");
+			rmi4_data->sensor_max_y=2500-rmi4_data->board->maxy_offset;
+		}
+	}
+	else if(rmi4_data->config_id.sensor==0x39)//ecw
+		rmi4_data->sensor_max_y=2055-rmi4_data->board->maxy_offset;
+	#endif//xym 20140808
 	input_set_abs_params(rmi4_data->input_dev, ABS_X,
 			     0, rmi4_data->sensor_max_x, 0, 0);
 	input_set_abs_params(rmi4_data->input_dev, ABS_Y,

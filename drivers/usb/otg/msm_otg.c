@@ -981,6 +981,7 @@ static int msm_otg_suspend(struct msm_otg *motg)
 	u32 portsc, config2;
 	u32 func_ctrl;
 
+	pr_info("%s : %d\n", __func__, __LINE__);
 	if (atomic_read(&motg->in_lpm))
 		return 0;
 
@@ -1224,6 +1225,7 @@ static int msm_otg_resume(struct msm_otg *motg)
 	unsigned ret;
 	u32 func_ctrl;
 
+	pr_info("%s : %d\n", __func__, __LINE__);
 	if (!atomic_read(&motg->in_lpm))
 		return 0;
 
@@ -2860,7 +2862,16 @@ static void msm_otg_sm_work(struct work_struct *w)
 			 */
 			pm_runtime_mark_last_busy(otg->phy->dev);
 			pm_runtime_autosuspend(otg->phy->dev);
-			motg->pm_done = 1;
+			/*
+			 * In case otg resume happens one step ahead of pm_done=1,
+			 * caused by extremely fast disconnect/connect.
+			 */
+			if (!pm_runtime_get_count(otg->phy->dev)){
+				pr_info("%s pm_done=1\n", __func__);
+				motg->pm_done = 1;
+			}else{
+				pr_info("%s try to set pm_done=1 when usage_count>0\n", __func__);
+			}
 		}
 		break;
 	case OTG_STATE_B_SRP_INIT:

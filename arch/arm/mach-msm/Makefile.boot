@@ -106,6 +106,7 @@ endif
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-gruis.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-aquilae.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8926-zte-rf360.dtb
+        dtb-$(CONFIG_ARCH_MSM8226)      += msm8926-zte-herculis.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-sim.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-fluid.dtb
 	dtb-$(CONFIG_ARCH_MSM8226)	+= msm8226-v1-cdp.dtb

@@ -100,6 +100,11 @@ static inline void pm_runtime_mark_last_busy(struct device *dev)
 	ACCESS_ONCE(dev->power.last_busy) = jiffies;
 }
 
+//wangzy_20140805
+static inline int pm_runtime_get_count(struct device *dev)
+{
+	return atomic_read(&dev->power.usage_count);
+}
 #else /* !CONFIG_PM_RUNTIME */
 
 static inline int __pm_runtime_idle(struct device *dev, int rpmflags)
@@ -152,7 +157,7 @@ static inline unsigned long pm_runtime_autosuspend_expiration(
 
 static inline void pm_runtime_update_max_time_suspended(struct device *dev,
 							s64 delta_ns) {}
-
+static inline int pm_runtime_get_count(struct device *dev){} //wangzy_20140805
 #endif /* !CONFIG_PM_RUNTIME */
 
 static inline int pm_runtime_idle(struct device *dev)
@@ -250,5 +255,4 @@ static inline void pm_runtime_dont_use_autosuspend(struct device *dev)
 {
 	__pm_runtime_use_autosuspend(dev, false);
 }
-
 #endif

@@ -38,4 +38,5 @@
 };
 &pm8226_chg {
 	qcom,ext-ovp-present;
+	qcom,ibatmax-ma = <1100>;
 };

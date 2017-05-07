@@ -105,7 +105,17 @@
 
 				39 01 00 00 00 00 02 C0 04
 
-				39 01 00 00 00 00 02 BE 9F
+				39 01 00 00 00 00 02 BE 9F				
+
+
+				39 01 00 00 00 00 03 B3 1C 1C	//add  for white color around the panel 20140806  start  
+
+				39 01 00 00 00 00 03 B4 17 17
+
+				39 01 00 00 00 00 03 B9 35 35
+
+				39 01 00 00 00 00 03 BA 25 25	//add  for white color around the panel 20140806  end
+				
 
 				39 01 00 00 00 00 03 B3 35 35
 

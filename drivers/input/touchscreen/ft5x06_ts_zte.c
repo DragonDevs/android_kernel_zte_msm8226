@@ -1419,7 +1419,7 @@ static struct i2c_driver ft5x0x_ts_driver = {
 static int __init ft5x0x_ts_init(void)
 {
 	int ret;
-	ret = i2c_add_driver_async(&ft5x0x_ts_driver);
+	ret = i2c_add_driver(&ft5x0x_ts_driver);
 	if (ret) {
 		printk(KERN_WARNING "Adding ft5x0x driver failed "
 		       "(errno = %d)\n", ret);

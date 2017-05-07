@@ -331,7 +331,83 @@
 		qcom,cci-master = <0>;
 		status = "ok";
 	};
-	 
+
+   	 qcom,camera@5 {
+		compatible = "qcom,imx219";
+		reg = <0x5>;
+		qcom,slave-id = <0x20 0x0000 0x0219>;
+		qcom,csiphy-sd-index = <0>;
+		qcom,csid-sd-index = <0>;
+		qcom,actuator-src = <&actuator_zte1>;
+		qcom,led-flash-src = <&led_flash_lm3642>;
+		qcom,mount-angle = <90>;
+		qcom,sensor-name = "imx219";
+		qcom,gpio-no-mux = <0>;
+		gpios = <&msmgpio 26 0>,
+			<&msmgpio 36 0>,
+			<&msmgpio 37 0>,
+			<&msmgpio 67 0>,
+			<&msmgpio 69 0>,
+			<&msmgpio 34 0>,
+			<&msmgpio 27 0>;
+		qcom,gpio-standby = <1>;
+		qcom,gpio-reset = <2>;
+		qcom,gpio-vdig = <3>;
+		qcom,gpio-vana = <4>;
+		qcom,gpio-vio = <5>;
+		qcom,gpio-vaf = <6>;
+		qcom,gpio-req-tbl-num = <0 1 2 3 4 5 6>;
+		qcom,gpio-req-tbl-flags = <1 0 0 0 0 0 0>;
+		qcom,gpio-req-tbl-label = "CAMIF_MCLK",
+			"CAM_STANDBY",
+			"CAM_RESET1",
+			"CAM_VDIG",
+			"CAM_VANA",
+			"CAM_VIO",
+			"CAM_VAF";
+		qcom,csi-lane-assign = <0x4320>;
+		qcom,csi-lane-mask = <0x1f>;
+		qcom,sensor-position = <0>;
+		qcom,sensor-mode = <0>;
+		qcom,sensor-type = <0>;
+		qcom,cci-master = <0>;
+		status = "ok";
+	};
+
+	qcom,camera@6 {
+		compatible = "qcom,ov2680";
+		reg = <0x6>;
+		qcom,slave-id = <0x6c 0x300a 0x2680>;
+		qcom,csiphy-sd-index = <1>;
+		qcom,csid-sd-index = <1>;
+		qcom,mount-angle = <270>;
+		qcom,sensor-name = "ov2680";
+		qcom,gpio-no-mux = <0>;
+		gpios = <&msmgpio 26 0>,
+			<&msmgpio 35 0>,
+			<&msmgpio 28 0>,
+			<&msmgpio 34 0>,
+			<&msmgpio 66 0>,
+			<&msmgpio 69 0>;
+		qcom,gpio-standby = <1>;
+		qcom,gpio-reset = <2>;
+		qcom,gpio-vio = <3>;
+		qcom,gpio-vana = <4>;
+		qcom,gpio-req-tbl-num = <0 1 2 3 4>;
+		qcom,gpio-req-tbl-flags = <1 0 0 0 0>;
+		qcom,gpio-req-tbl-label = "CAMIF_MCLK",
+			"CAM_STANDBY",
+			"CAM_RESET",
+			"CAM_VIO",
+			"CAM_VANA";
+		qcom,csi-lane-assign = <0x4320>;
+		qcom,csi-lane-mask = <0x3>;
+		qcom,sensor-position = <1>;
+		qcom,sensor-mode = <1>;
+		qcom,cci-master = <0>;
+		status = "ok";
+	};	 
+
 };
 &soc {
 	//there is only rear camera

@@ -2597,11 +2597,11 @@ Output:
 
     
 #if GTP_AUTO_UPDATE
-    ret = gup_init_update_proc(ts);
-    if (ret < 0)
-    {
-        GTP_ERROR("Create update thread error.");
-    }
+    //ret = gup_init_update_proc(ts);
+    //if (ret < 0)
+    //{
+    //    GTP_ERROR("Create update thread error.");
+    //}
 #endif
 
     ret = gtp_request_input_dev(ts);
